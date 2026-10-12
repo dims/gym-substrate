@@ -70,7 +70,11 @@ with it.
 In a Gym checkout, build the environment with `uv sync --extra dev --extra sandbox`,
 then install this package into it with `uv pip install git+https://github.com/dims/gym-substrate`.
 Install it after the last sync: a plain `uv sync` removes packages that are not in
-Gym's lock. Start the servers from the activated venv. Running them through `uv run`
+Gym's lock. A server that builds its own venv from a `requirements.txt` in its
+directory, as `mini_swe_agent_2` does, resolves the provider inside that venv: add
+`gym-substrate @ git+https://github.com/dims/gym-substrate` to that file, or install the
+package into `<server dir>/.venv` after the first start (Gym keeps that venv and only
+adds to it). Start the servers from the activated venv. Running them through `uv run`
 makes Ray's `uv run` hook demand a `pyproject.toml` inside the agent's directory and the
 `mini_swe_agent_2` server exits at startup.
 
