@@ -15,3 +15,11 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: shellcheck -x hack/gym-templates.sh
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check gym_substrate tests && uv run ruff format --check gym_substrate tests
+      - run: uv run pytest -q
