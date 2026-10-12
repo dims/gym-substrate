@@ -73,7 +73,7 @@ workerSelector:
 containers:
 - name: sandbox
   image: ${pinned}
-  command: ["/ate/ko-app/sandbox"]
+  command: ["/ate/ko-app/sandbox-agent"]
   env:
   - name: PORT
     value: "80"
