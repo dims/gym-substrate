@@ -40,8 +40,10 @@ WORKLOAD="${WORKLOAD:-sandbox}"
 ACTOR_CPU="${ACTOR_CPU:-1}"
 ACTOR_MEMORY="${ACTOR_MEMORY:-1Gi}"
 
+# This module has no go-containerregistry dependency, so the version is pinned here.
+CRANE_VERSION="${CRANE_VERSION:-v0.21.7}"
 crane() {
-  go run "github.com/google/go-containerregistry/cmd/crane@$(go list -m -f '{{.Version}}' github.com/google/go-containerregistry)" "$@"
+  go run "github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}" "$@"
 }
 
 kubectl ate get atespaces "${ATESPACE}" >/dev/null 2>&1 || kubectl ate create atespace "${ATESPACE}"
