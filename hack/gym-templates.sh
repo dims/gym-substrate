@@ -46,6 +46,10 @@ crane() {
   go run "github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}" "$@"
 }
 
+# ko builds linux/amd64 unless told otherwise; the agent must match the nodes.
+NODE_ARCH="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}')"
+export KO_DEFAULTPLATFORMS="${KO_DEFAULTPLATFORMS:-linux/${NODE_ARCH}}"
+
 kubectl ate get atespaces "${ATESPACE}" >/dev/null 2>&1 || kubectl ate create atespace "${ATESPACE}"
 
 for image in "$@"; do
