@@ -23,7 +23,7 @@ Response:
 ```
 
 - `stdout` and `stderr` are each capped at 8 MiB.
-- The command runs in its own process group; on `timeout_s` the group is killed and `exit_code` is `125`, the sentinel the Gym sandbox SDK uses for "no process exit status". `error_type` names the agent-side cause when that happens.
+- The command runs in its own process group; on `timeout_s` the group is killed and `exit_code` is `125`, the sentinel the Gym sandbox SDK uses for "no process exit status". `error_type` is then `timeout`, or `sandbox` when the command could not be started at all.
 - `evicting` is `true` on the first reply after the worker sent the actor `SIGTERM` (its pod is going away). The agent keeps serving so the actor can still be suspended within the grace period; the client is expected to pause or suspend the actor on seeing it.
 
 ## `POST /upload?path=<file>`
