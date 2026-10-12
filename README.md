@@ -23,7 +23,7 @@ KO_DOCKER_REPO=<registry> ko build --base-import-paths ./cmd/sandbox-agent
 uv sync && uv run pytest
 ```
 
-`scripts/generate_ateapi_stubs.sh /path/to/substrate` regenerates the gRPC stubs from Substrate's `ateapi.proto` and records the commit.
+`scripts/generate_ateapi_stubs.sh /path/to/substrate` regenerates the gRPC stubs from Substrate's `ateapi.proto` and records the commit. `scripts/smoke_provider.py` runs one sandbox through the provider against a live cluster (see [docs/provider.md](docs/provider.md)).
 
 ## Create templates
 

@@ -68,9 +68,10 @@ with it.
 ### Run
 
 In a Gym checkout, build the environment with `uv sync --extra dev --extra sandbox`,
-install this package into it with `uv pip install git+https://github.com/dims/gym-substrate`,
-then start the servers from the activated venv. Running them through `uv run` makes Ray's
-`uv run` hook demand a `pyproject.toml` inside the agent's directory and the
+then install this package into it with `uv pip install git+https://github.com/dims/gym-substrate`.
+Install it after the last sync: a plain `uv sync` removes packages that are not in
+Gym's lock. Start the servers from the activated venv. Running them through `uv run`
+makes Ray's `uv run` hook demand a `pyproject.toml` inside the agent's directory and the
 `mini_swe_agent_2` server exits at startup.
 
 ```bash
@@ -81,9 +82,22 @@ source .venv/bin/activate
 gym env start "+config_paths=[responses_api_agents/mini_swe_agent_2/configs/mini_swe_agent_2.yaml,/path/to/gym-substrate/gym_substrate/configs/substrate.yaml,<model>.yaml]"
 ```
 
-The cluster's nodes must be **amd64**: SWE-bench publishes x86_64 images only
-and gVisor does not emulate, so on arm64 an actor fails to start with
-`runsc start`: exit status 128.
+gVisor does not emulate, so an image must match the node architecture or the
+actor fails to start with `runsc start`: exit status 128. SWE-bench publishes
+`sweb.eval.x86_64.*` images and, for part of the instances, `sweb.eval.arm64.*`;
+on arm64 nodes map one to the other with the agent's `sandbox_spec.image_rewrites`
+(`from: docker.io/swebench/sweb.eval.x86_64.`, `to: <registry>/swebench/sweb.eval.arm64.`).
+
+### Live smoke
+
+`scripts/smoke_provider.py` runs one sandbox through create, the parked state,
+exec (a resume), a timeout, status, download and close, from the venv the plugin
+is installed in:
+
+```bash
+ATEAPI_ADDR=localhost:8080 ATENET_ADDR=localhost:8000 \
+  python scripts/smoke_provider.py python:3.12-slim pause_after_exec
+```
 
 ## Authentication and trust
 
