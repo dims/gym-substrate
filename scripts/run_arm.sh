@@ -12,7 +12,8 @@
 # example.jsonl, first row), RUN_DIR and LOG_DIR (default ~/gym-run and ~/logs),
 # REPLAY_URL (default http://127.0.0.1:9797), EXTRA_CONFIGS (comma-separated
 # config paths appended to the servers' config, such as an image-rewrites
-# file), ATESPACE (default nemo-gym).
+# file), ATESPACE (default nemo-gym), SERVER_WAIT_S (default 600: the first start builds
+# the agent server's venv).
 set -uo pipefail
 NAME="$1"; CFG="$2"; N="$3"
 GYM_DIR="${GYM_DIR:-$PWD}"; RUN_DIR="${RUN_DIR:-$HOME/gym-run}"; LOG_DIR="${LOG_DIR:-$HOME/logs}"
@@ -41,10 +42,10 @@ SERVER_LOG="$LOG_DIR/gym-env-$NAME.log"
 CONFIGS="$AGENT_CFG,$CFG,$MODEL_CFG${EXTRA_CONFIGS:+,$EXTRA_CONFIGS}"
 nohup gym env start "+config_paths=[$CONFIGS]" > "$SERVER_LOG" 2>&1 < /dev/null &
 n=0
-for _ in $(seq 1 36); do
+for _ in $(seq 1 $(( ${SERVER_WAIT_S:-600} / 5 ))); do
   sleep 5; n=$(grep -c "startup complete" "$SERVER_LOG"); [ "$n" -ge 4 ] && break
 done
-[ "$n" -ge 4 ] || { echo "servers failed to start; see $SERVER_LOG"; exit 1; }
+[ "$n" -ge 4 ] || { echo "servers failed to start within ${SERVER_WAIT_S:-600}s; see $SERVER_LOG"; exit 1; }
 
 # Warm-up: one rollout so the agent server's Ray runtime and venv are up before
 # N requests arrive at once. Not part of the measurement.

@@ -26,6 +26,8 @@
 #                   actors share one worker, so size both against the pool
 #   AGENT_IMAGE     digest-pinned sandbox server image (default: ko build,
 #                   which needs KO_DOCKER_REPO)
+#   WAIT_GOLDEN     set to wait until every template named here has a golden
+#                   snapshot (WAIT_GOLDEN_TIMEOUT seconds, default 600)
 #
 # Pass each image as NeMo Gym will ask for it. The template name is derived
 # from the image string after dropping a docker:// or oci:// scheme and a
@@ -52,11 +54,14 @@ export KO_DEFAULTPLATFORMS="${KO_DEFAULTPLATFORMS:-linux/${NODE_ARCH}}"
 
 kubectl ate get atespaces "${ATESPACE}" >/dev/null 2>&1 || kubectl ate create atespace "${ATESPACE}"
 
+names=()
+
 for image in "$@"; do
   ref="${image#docker://}"
   ref="${ref#oci://}"
   ref="${ref#docker.io/}"
   name="swb-$(printf %s "${ref}" | shasum -a 256 | cut -c1-16)"
+  names+=("${name}")
   pinned="${ref%%@*}@$(crane digest "${ref}")"
   if existing="$(kubectl ate get actor-template "${name}" -a "${ATESPACE}" -o yaml 2>/dev/null)"; then
     if grep -q "image: ${pinned}\$" <<<"${existing}"; then
@@ -66,7 +71,10 @@ for image in "$@"; do
     fi
     continue
   fi
-  AGENT_IMAGE="${AGENT_IMAGE:-$(ko build --base-import-paths ./cmd/sandbox-agent)}"
+  if [ -z "${AGENT_IMAGE:-}" ]; then
+    AGENT_IMAGE="$(ko build --base-import-paths ./cmd/sandbox-agent)"
+    echo "agent image ${AGENT_IMAGE} ($(crane config "${AGENT_IMAGE}" | python3 -c 'import json, sys; c = json.load(sys.stdin); print(c["os"], c["architecture"])'))"
+  fi
   kubectl ate create actor-template -f - <<MANIFEST
 metadata:
   atespace: ${ATESPACE}
@@ -108,3 +116,19 @@ sandboxConfig:
 MANIFEST
   echo "${ATESPACE}/${name} serves ${ref}"
 done
+
+if [ -n "${WAIT_GOLDEN:-}" ] && [ "${#names[@]}" -gt 0 ]; then
+  deadline=$((SECONDS + ${WAIT_GOLDEN_TIMEOUT:-600}))
+  while :; do
+    ready=0
+    for n in "${names[@]}"; do
+      [ -n "$(kubectl ate get actor-template "${n}" -a "${ATESPACE}" 2>/dev/null | awk 'NR>1 && $4 ~ /^[0-9a-f]{8}-/')" ] && ready=$((ready + 1))
+    done
+    if [ "${ready}" -eq "${#names[@]}" ]; then echo "all templates have a golden (${ready})"; break; fi
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      kubectl ate get actor-template -a "${ATESPACE}"
+      echo "GOLDEN_WAIT_FAILED: ${ready} of ${#names[@]} templates have a golden" >&2; exit 1
+    fi
+    sleep 5
+  done
+fi
