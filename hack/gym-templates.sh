@@ -32,7 +32,7 @@
 # docker.io/ registry, the same way the provider's unit-tested
 # template_name_for_image does.
 set -o errexit -o nounset -o pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.." || exit 1
 
 : "${BUCKET_NAME:?set BUCKET_NAME to the snapshot bucket}"
 ATESPACE="${ATESPACE:-nemo-gym}"

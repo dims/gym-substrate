@@ -15,7 +15,7 @@
 
 """Live smoke for the Substrate sandbox provider against a cluster.
 
-    ATEAPI_ADDR=localhost:8080 ATENET_ADDR=localhost:8000 \
+    ATEAPI_ADDR=localhost:8080 ATENET_ADDR=localhost:8000 ATESPACE=nemo-gym \
       python scripts/smoke_provider.py [IMAGE] [never|after_exec|pause_after_exec]
 
 create -> wait past the idle debounce and assert the policy's parked state -> exec (a resume)
@@ -40,7 +40,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 IMAGE = sys.argv[1] if len(sys.argv) > 1 else "python:3.12-slim"
 POLICY = sys.argv[2] if len(sys.argv) > 2 else "pause_after_exec"
-ATESPACE = "nemo-gym"
+ATESPACE = os.environ.get("ATESPACE", "nemo-gym")
 # idle_before_suspend_s in configs/substrate.yaml is 1 s; wait past it before reading the state.
 PARK_WAIT_S = 1.5
 PARKED_STATE = {"pause_after_exec": "ACTOR_STATE_PAUSED", "after_exec": "ACTOR_STATE_SUSPENDED"}.get(POLICY)

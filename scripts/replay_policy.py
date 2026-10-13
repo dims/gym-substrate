@@ -15,7 +15,7 @@
 
 """OpenAI-compatible chat-completions server that replays recorded NeMo Gym rollouts.
 
-    python scripts/replay_policy.py --rollouts example_rollouts.jsonl --port 9797 --think-mean-s 15 --seed 1
+    python scripts/replay_policy.py --rollouts example_rollouts.jsonl --think-mean-s 15 --seed 1
 
 Run it from the Gym venv, which has fastapi and uvicorn.
 
@@ -171,7 +171,7 @@ def build_app(rollouts: list[dict], think_s: float, think_mean_s: float | None, 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rollouts", required=True)
-    parser.add_argument("--port", type=int, default=9999)
+    parser.add_argument("--port", type=int, default=9797)
     parser.add_argument("--think-s", type=float, default=3.0, help="constant seconds to wait before each answer")
     parser.add_argument(
         "--think-mean-s", type=float, default=None, help="draw the wait from an exponential with this mean"

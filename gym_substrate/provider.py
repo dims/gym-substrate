@@ -122,8 +122,8 @@ def template_name_for_image(image: str) -> str:
 
     An ActorTemplate spec is immutable and an actor names a template rather than
     an image, so templates are built ahead of a run. Deriving the name from the
-    image lets both sides agree without a shared lookup table. Substrate's
-    demos/sandbox/gym-templates.sh computes the same name; a unit test pins it.
+    image lets both sides agree without a shared lookup table.
+    hack/gym-templates.sh computes the same name; a unit test pins it.
     """
     digest = hashlib.sha256(image.encode()).hexdigest()
     return TEMPLATE_NAME_PREFIX + digest[:TEMPLATE_DIGEST_LENGTH]
@@ -212,8 +212,9 @@ class SubstrateConnectionConfig:
     token: str | None = None
 
     grpc_timeout_s: float = 120.0
-    # Connections to the router at once; None is unlimited. httpx's default
-    # pool of 100 would cap in-flight execs at 100 per process.
+    # Connections to the router at once; None is unlimited. Gym makes one
+    # provider per sandbox; an instance shared across sandboxes would
+    # otherwise be capped at httpx's default pool of 100.
     http_max_connections: int | None = None
 
     def __post_init__(self) -> None:
