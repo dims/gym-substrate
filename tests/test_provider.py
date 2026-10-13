@@ -652,3 +652,103 @@ async def test_status_not_found_is_stopped() -> None:
 
     provider._control = not_found  # type: ignore[method-assign]
     assert await provider.status(handle) == SandboxStatus.STOPPED
+
+
+async def test_ready_wait_does_not_charge_time_queued_for_a_slot() -> None:
+    recorder = _Recorder()
+    provider = substrate_provider.SubstrateProvider(
+        connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE},
+        create={"ready_timeout_s": 0.05, "idle_before_suspend_s": 0.0},
+        probe={"stable_delay_s": 0.02},
+    )
+    provider._control = recorder.control  # type: ignore[method-assign]
+    probes = 0
+
+    def router(request: httpx.Request) -> httpx.Response:
+        nonlocal probes
+        if request.url.path != "/readyz":
+            return httpx.Response(204)
+        probes += 1
+        # The resume outran its deadline ten times: 0.2 s queued against a
+        # 0.05 s ready budget.
+        return httpx.Response(504) if probes <= 10 else httpx.Response(200)
+
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+
+    await provider.create(SandboxSpec(image=IMAGE))
+
+    assert probes == 11
+    assert "DeleteActor" not in recorder.rpcs()
+
+
+async def test_ready_wait_still_ends_when_the_queue_budget_is_spent() -> None:
+    recorder = _Recorder(probe_status=504)
+    provider = substrate_provider.SubstrateProvider(
+        connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE},
+        create={"ready_timeout_s": 5.0, "ready_queue_timeout_s": 0.03, "idle_before_suspend_s": 0.0},
+        probe={"stable_delay_s": 0.01},
+    )
+    provider._control = recorder.control  # type: ignore[method-assign]
+    provider._http = recorder.http  # type: ignore[method-assign]
+
+    with pytest.raises(substrate_provider.SubstrateCreateVerificationError, match="queued for a worker slot"):
+        await provider.create(SandboxSpec(image=IMAGE))
+
+    assert recorder.rpcs().count("DeleteActor") == 1
+
+
+async def test_exec_retries_a_bare_504_like_a_capacity_503() -> None:
+    recorder = _Recorder()
+    provider = _make_provider(recorder)
+    execs = 0
+
+    def router(request: httpx.Request) -> httpx.Response:
+        nonlocal execs
+        if request.url.path != "/exec":
+            return httpx.Response(200)
+        execs += 1
+        return (
+            httpx.Response(504)
+            if execs <= 2
+            else httpx.Response(200, json={"stdout": "", "stderr": "", "exit_code": 0})
+        )
+
+    provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)  # real path, fake transport
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+
+    result = await provider.exec(handle, "true", timeout_s=5)
+
+    assert result.return_code == 0 and result.error_type is None
+    assert execs == 3
+
+
+async def test_failed_create_cleanup_keeps_deleting_in_the_background(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(substrate_provider, "_FAILED_CREATE_CLEANUP_RETRY_S", 0.01)
+    recorder = _Recorder(probe_status=404)
+    deletes = 0
+
+    async def control(rpc: str, request: Any) -> Any:
+        nonlocal deletes
+        if rpc == "DeleteActor":
+            deletes += 1
+            if deletes <= 3:
+                # The parked probe's resume flight still holds the lease.
+                raise _grpc_error(grpc.StatusCode.ABORTED, "another operation is in progress for this actor")
+        return await recorder.control(rpc, request)
+
+    provider = substrate_provider.SubstrateProvider(
+        connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE},
+        create={"ready_timeout_s": 0.02, "idle_before_suspend_s": 0.0},
+        probe={"stable_delay_s": 0.0},
+    )
+    provider._control = control  # type: ignore[method-assign]
+    provider._http = recorder.http  # type: ignore[method-assign]
+
+    with pytest.raises(substrate_provider.SubstrateCreateVerificationError):
+        await provider.create(SandboxSpec(image=IMAGE))
+    assert deletes == 1
+
+    await provider.aclose()
+
+    assert deletes == 4

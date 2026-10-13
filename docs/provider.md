@@ -152,7 +152,8 @@ sandbox:
       atespace: nemo-gym            # actors are created here
       template_namespace: nemo-gym  # templates are looked up here
     create:
-      ready_timeout_s: 1200         # create() and resume() wait this long for a worker slot
+      ready_timeout_s: 1200         # create() and resume() wait this long for the actor to answer
+      ready_queue_timeout_s: 3600   # and this long more while the router queues the probe for a worker slot
       suspend_policy: pause_after_exec   # never | after_exec | pause_after_exec
       idle_before_suspend_s: 1.0
     exec:

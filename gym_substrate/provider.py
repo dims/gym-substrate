@@ -74,6 +74,13 @@ _TRANSIENT_MARKERS = (
 )
 _TRANSITION_RETRY_DELAY_S = 1.0
 _TRANSIENT_RETRY_BUDGET_S = 60.0
+
+# After a failed create the actor's resume flight can still hold its lease, so
+# DeleteActor answers ABORTED ("another operation is in progress"). The flight
+# ends by the router's parking budget; the delete is retried in the background
+# for longer than that instead of being given up, or the actor keeps a worker.
+_FAILED_CREATE_CLEANUP_RETRY_S = 15.0
+_FAILED_CREATE_CLEANUP_BUDGET_S = 900.0
 # How long a park may stay mid-transition before the provider stops waiting.
 _PARK_SETTLE_BUDGET_S = 30.0
 
@@ -137,12 +144,17 @@ def normalize_image(image: str) -> str:
     return image
 
 
-def _classify_503(response: httpx.Response) -> str | None:
-    """Return "capacity", "transient", or None for a 503 that is not worth retrying.
+def _classify_unavailable(response: httpx.Response) -> str | None:
+    """Return "capacity", "transient", or None for a 503 or 504 not worth retrying.
 
     Every 503 the router makes before forwarding reads "actor <id>
     unavailable[: <reason>]"; a bare one with no reason is ateapi being away.
+    A 504 with an empty body is the router failing a resume fast once it
+    outran its deadline (the restore queue was longer than the deadline); the
+    request never reached the actor, so it is retried like a full parking lot.
     """
+    if response.status_code == 504 and not response.text.strip():
+        return "capacity"
     if response.status_code != 503:
         return None
     text = response.text
@@ -214,9 +226,13 @@ class SubstrateConnectionConfig:
 @dataclass(frozen=True)
 class SubstrateCreateConfig:
     # How long create() and resume() wait for the actor to answer its readiness
-    # probe through the router. Under load this is mostly waiting for a worker
-    # slot. SandboxSpec.ready_timeout_s overrides it per sandbox.
+    # probe through the router. SandboxSpec.ready_timeout_s overrides it per
+    # sandbox. Time a probe spends waiting on the router for a worker slot (a
+    # capacity 503, or the 504 of a resume that outran its deadline) is not
+    # charged to it: the actor is queued, not slow. ready_queue_timeout_s
+    # bounds that queue time instead.
     ready_timeout_s: float = 1200.0
+    ready_queue_timeout_s: float = 3600.0
 
     # never: leave the actor running between calls.
     # after_exec: SuspendActor once the actor goes idle. The snapshot goes to
@@ -265,9 +281,10 @@ class SubstrateProbeConfig:
     """Readiness probe run against the actor through the router."""
 
     path: str = "/readyz"
-    # Longer than the router's parking budget, so a probe waiting for a worker
-    # slot is held by the router rather than cut by the client and re-parked.
-    timeout_s: float = 150.0
+    # Longer than the router's parking budget (10 min on the saturation
+    # clusters), so a probe waiting for a worker slot is held by the router
+    # rather than cut by the client and re-parked.
+    timeout_s: float = 660.0
     stable_count: int = 1
     stable_delay_s: float = 1.0
 
@@ -332,6 +349,7 @@ class SubstrateProvider:
 
         self._semaphore = asyncio.Semaphore(self._exec_config.concurrency)
         self._suspend_tasks: set[asyncio.Task] = set()
+        self._cleanup_tasks: set[asyncio.Task] = set()
         self._channel: grpc.aio.Channel | None = None
         self._stub: Any = None
         self._http_client: httpx.AsyncClient | None = None
@@ -481,7 +499,7 @@ class SubstrateProvider:
 
         The ate-target-actor header names the actor, and is also what makes
         the router resume a suspended or paused actor before forwarding. A 503
-        the router produced before forwarding is retried (see _classify_503);
+        the router produced before forwarding is retried (see _classify_unavailable);
         the request never reached the actor, so that is safe. Readiness probes
         pass retry=False: their own loop retries, and each attempt must get
         the router's whole parking budget.
@@ -518,7 +536,7 @@ class SubstrateProvider:
                 response = await self._http_client.request(
                     method, path, headers=headers, json=json, content=content, params=params, timeout=remaining
                 )
-            kind = _classify_503(response) if retry else None
+            kind = _classify_unavailable(response) if retry else None
             if kind is None:
                 return response
             if kind == "capacity":
@@ -614,11 +632,15 @@ class SubstrateProvider:
         """
         probe = self._probe
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + deadline_s
+        queue_budget_s = self._create_config.ready_queue_timeout_s
+        spent_s = 0.0  # charged to deadline_s: the actor answering, or failing to
+        queued_s = 0.0  # waiting on the router for a worker slot
         consecutive = 0
         last_detail = "no probe attempt completed"
 
         while True:
+            started = loop.time()
+            queued = False
             try:
                 response = await self._http(
                     "GET", handle.raw, probe.path, timeout_s=probe.timeout_s, limited=False, retry=False
@@ -630,16 +652,23 @@ class SubstrateProvider:
                 else:
                     consecutive = 0
                     last_detail = f"status={response.status_code}, body={response.text.strip()!r}"
+                    queued = _classify_unavailable(response) == "capacity"
             except httpx.HTTPError as e:
                 consecutive = 0
                 last_detail = repr(e)
 
-            if loop.time() >= deadline:
-                raise SubstrateCreateVerificationError(
-                    f"actor {handle.sandbox_id!r} did not become ready within {deadline_s:g}s: {last_detail}"
-                )
             if probe.stable_delay_s > 0:
                 await asyncio.sleep(probe.stable_delay_s)
+            elapsed = loop.time() - started
+            if queued:
+                queued_s += elapsed
+            else:
+                spent_s += elapsed
+            if spent_s >= deadline_s or queued_s >= queue_budget_s:
+                raise SubstrateCreateVerificationError(
+                    f"actor {handle.sandbox_id!r} did not become ready within {deadline_s:g}s "
+                    f"({spent_s:.0f}s probing, {queued_s:.0f}s queued for a worker slot): {last_detail}"
+                )
 
     async def _upload_spec_files(self, handle: SandboxHandle, spec: SandboxSpec) -> None:
         for target_path, content in (spec.files or {}).items():
@@ -648,8 +677,32 @@ class SubstrateProvider:
     async def _cleanup_failed_create(self, handle: SandboxHandle) -> None:
         try:
             await self.close(handle)
-        except Exception as e:
-            LOGGER.warning("substrate: cleaning up failed create of %s: %s", handle.sandbox_id, e)
+        except Exception as e:  # noqa: BLE001 - the delete goes on in the background
+            LOGGER.warning(
+                "substrate: cleaning up failed create of %s: %s; retrying in the background for up to %.0fs",
+                handle.sandbox_id,
+                e,
+                _FAILED_CREATE_CLEANUP_BUDGET_S,
+            )
+            task = asyncio.create_task(self._retry_failed_create_cleanup(handle))
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_tasks.discard)
+
+    async def _retry_failed_create_cleanup(self, handle: SandboxHandle) -> None:
+        """Delete an actor whose create failed while a resume flight still held its lease."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _FAILED_CREATE_CLEANUP_BUDGET_S
+        while True:
+            await asyncio.sleep(_FAILED_CREATE_CLEANUP_RETRY_S)
+            try:
+                await self.close(handle)
+            except Exception as e:  # noqa: BLE001 - retried until the budget ends
+                if loop.time() < deadline:
+                    continue
+                LOGGER.error("substrate: gave up cleaning up failed create of %s: %s", handle.sandbox_id, e)
+                return
+            LOGGER.info("substrate: failed create of %s cleaned up", handle.sandbox_id)
+            return
 
     # ---- operations ---- #
 
@@ -963,6 +1016,8 @@ class SubstrateProvider:
         # the actor is left mid-transition.
         if self._suspend_tasks:
             await asyncio.gather(*self._suspend_tasks, return_exceptions=True)
+        if self._cleanup_tasks:
+            await asyncio.gather(*self._cleanup_tasks, return_exceptions=True)
         if self._http_client is not None:
             await self._http_client.aclose()
             self._http_client = None
