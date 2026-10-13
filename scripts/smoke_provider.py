@@ -65,7 +65,9 @@ async def main() -> int:
 
     t0 = time.monotonic()
     handle = await provider.create(SandboxSpec(image=IMAGE, files={"/work/seed.txt": "seed\n"}))
-    print(f"create    {time.monotonic() - t0:6.1f}s  id={handle.sandbox_id}  state={await actor_state(provider, handle)}")
+    print(
+        f"create    {time.monotonic() - t0:6.1f}s  id={handle.sandbox_id}  state={await actor_state(provider, handle)}"
+    )
     if PARKED_STATE:
         # The provider parks a new sandbox too, so the first exec is a resume.
         await asyncio.sleep(PARK_WAIT_S)

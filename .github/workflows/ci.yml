@@ -14,12 +14,12 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...
-      - run: shellcheck -x hack/gym-templates.sh
+      - run: shellcheck -x hack/gym-templates.sh scripts/run_arm.sh
   python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
-      - run: uv run ruff check gym_substrate tests && uv run ruff format --check gym_substrate tests
+      - run: uv run ruff check gym_substrate scripts tests && uv run ruff format --check gym_substrate scripts tests
       - run: uv run pytest -q

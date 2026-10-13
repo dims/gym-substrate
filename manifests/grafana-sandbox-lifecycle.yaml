@@ -1,0 +1,145 @@
+# Grafana in otel-system on the kind install's Prometheus, with the "Sandbox lifecycle" dashboard.
+#   kubectl apply -f manifests/grafana-sandbox-lifecycle.yaml
+#   kubectl -n otel-system port-forward svc/grafana 3000:3000   # http://localhost:3000/d/sandbox-lifecycle
+# Anonymous admin: keep it on a port-forward.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: otel-system
+data:
+  prometheus.yaml: |-
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus.otel-system.svc:9090
+      access: proxy
+      isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: otel-system
+data:
+  provider.yaml: |-
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: 'Substrate'
+      type: file
+      disableDeletion: false
+      updateIntervalSeconds: 10
+      editable: true
+      options:
+        path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: otel-system
+data:
+  sandbox-lifecycle.json: |-
+    {
+      "uid": "sandbox-lifecycle",
+      "title": "Sandbox lifecycle (NeMo Gym on Substrate)",
+      "schemaVersion": 38,
+      "refresh": "5s",
+      "time": {"from": "now-15m", "to": "now"},
+      "panels": [
+        {"id": 1, "type": "timeseries", "title": "Actor transitions / s by state",
+         "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+         "targets": [{"refId": "A", "expr": "sum by (ate_actor_state) (rate(substrate_actor_state_changes_total[1m]))", "legendFormat": "{{ate_actor_state}}"}]},
+        {"id": 2, "type": "timeseries", "title": "Lifecycle operations / s",
+         "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+         "targets": [{"refId": "A", "expr": "sum by (ate_actor_operation_name) (rate(ate_actor_lifecycle_operation_duration_seconds_count[1m]))", "legendFormat": "{{ate_actor_operation_name}}"}]},
+        {"id": 3, "type": "timeseries", "title": "Resume p50 by snapshot kind (cold golden vs warm local)",
+         "fieldConfig": {"defaults": {"unit": "s"}},
+         "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+         "targets": [{"refId": "A", "expr": "histogram_quantile(0.5, sum by (le, ate_snapshot_kind) (rate(ate_actor_lifecycle_operation_duration_seconds_bucket{ate_actor_operation_name=\"resume\"}[2m])))", "legendFormat": "{{ate_snapshot_kind}}"}]},
+        {"id": 4, "type": "timeseries", "title": "Request latency at the router p50, resume triggered vs not",
+         "fieldConfig": {"defaults": {"unit": "s"}},
+         "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+         "targets": [{"refId": "A", "expr": "histogram_quantile(0.5, sum by (le, ate_router_resume) (rate(atenet_router_route_duration_seconds_bucket[2m])))", "legendFormat": "resume={{ate_router_resume}}"}]},
+        {"id": 5, "type": "timeseries", "title": "Requests parked, waiting for a worker",
+         "gridPos": {"x": 0, "y": 16, "w": 8, "h": 8},
+         "targets": [{"refId": "A", "expr": "sum(atenet_router_parking_active)", "legendFormat": "parked now"},
+                     {"refId": "B", "expr": "histogram_quantile(0.9, sum by (le) (rate(atenet_router_parking_wait_duration_seconds_bucket[2m])))", "legendFormat": "wait p90 (s)"}]},
+        {"id": 6, "type": "timeseries", "title": "Restore phases p50",
+         "fieldConfig": {"defaults": {"unit": "s"}},
+         "gridPos": {"x": 8, "y": 16, "w": 8, "h": 8},
+         "targets": [{"refId": "A", "expr": "histogram_quantile(0.5, sum by (le, ate_snapshot_phase) (rate(ate_actor_restore_duration_seconds_bucket[2m])))", "legendFormat": "{{ate_snapshot_phase}}"}]},
+        {"id": 7, "type": "timeseries", "title": "Workers by state, and actors hosted",
+         "gridPos": {"x": 16, "y": 16, "w": 8, "h": 8},
+         "targets": [{"refId": "A", "expr": "sum by (ate_worker_state) (max by (ate_worker_state, ate_workerpool_name) (ate_workerpool_workers))", "legendFormat": "workers {{ate_worker_state}}"},
+                     {"refId": "B", "expr": "sum(ate_actor_stats_sampled_actors)", "legendFormat": "actors hosted (1 min lag)"}]},
+        {"id": 8, "type": "timeseries", "title": "Snapshot size p50 (bytes)",
+         "fieldConfig": {"defaults": {"unit": "bytes"}},
+         "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
+         "targets": [{"refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(atelet_snapshot_size_bytes_bucket[5m])))", "legendFormat": "p50"}]},
+        {"id": 9, "type": "timeseries", "title": "Scheduler: assignments / s by outcome",
+         "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
+         "targets": [{"refId": "A", "expr": "sum by (ate_scheduler_outcome) (rate(ate_scheduler_assignment_duration_seconds_count[1m]))", "legendFormat": "{{ate_scheduler_outcome}}"}]}
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: otel-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.0.0
+        env:
+        - name: GF_AUTH_ANONYMOUS_ENABLED
+          value: "true"
+        - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+          value: "Admin"
+        - name: GF_AUTH_DISABLE_LOGIN_FORM
+          value: "true"
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - name: grafana-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboards-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboards
+          mountPath: /var/lib/grafana/dashboards
+      volumes:
+      - name: grafana-datasources
+        configMap:
+          name: grafana-datasources
+      - name: grafana-dashboards-provider
+        configMap:
+          name: grafana-dashboards-provider
+      - name: grafana-dashboards
+        configMap:
+          name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: otel-system
+spec:
+  selector:
+    app: grafana
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
