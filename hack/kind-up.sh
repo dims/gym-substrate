@@ -80,7 +80,7 @@ for _ in $(seq 1 12); do
   [ "$A" != 000 ] && [ "$R" != 000 ] && break
   sleep 5
 done
-[ "$A" != 000 ] && [ "$R" != 000 ] || fail NODEPORTS "api $A router $R after 60 s"
+if [ "$A" = 000 ] || [ "$R" = 000 ]; then fail NODEPORTS "api $A router $R after 60 s"; fi
 echo "node ip $NODE_IP; api np https $A, router np http $R"
 
 step "demo sandbox and gym pool"

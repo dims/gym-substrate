@@ -13,7 +13,8 @@ set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 ASSET_DIR=${1:?asset dir with gvisor.tar.zstd and its .sha256}; ARCH=${2:-$(arch)}
 TAR="$ASSET_DIR/gvisor.tar.zstd"
-SHA=$(cut -d' ' -f1 "$TAR.sha256" 2>/dev/null) && [ -n "$SHA" ] || fail ASSET_SHA "no $TAR.sha256"
+SHA=$(cut -d' ' -f1 "$TAR.sha256" 2>/dev/null)
+[ -n "$SHA" ] || fail ASSET_SHA "no $TAR.sha256"
 echo "$SHA  $TAR" | sha256sum -c - >/dev/null || fail ASSET_SHA "sha256 mismatch for $TAR"
 # Backend and credentials from ate-api-server's object-store plugin container (the one whose
 # env names ATE_STORAGE_BACKEND), literal or secretKeyRef.
