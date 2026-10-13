@@ -72,11 +72,23 @@ then install this package into it with `uv pip install git+https://github.com/di
 Install it after the last sync: a plain `uv sync` removes packages that are not in
 Gym's lock. A server that builds its own venv from a `requirements.txt` in its
 directory, as `mini_swe_agent_2` does, resolves the provider inside that venv: add
-`gym-substrate @ git+https://github.com/dims/gym-substrate` to that file, or install the
-package into `<server dir>/.venv` after the first start (Gym keeps that venv and only
-adds to it). Start the servers from the activated venv. Running them through `uv run`
+`gym-substrate @ git+https://github.com/dims/gym-substrate` to that file, or, once the first
+`gym env start` has built that venv (about a minute), install it there; Gym keeps the venv
+and only adds to it:
+
+```bash
+uv pip install --python responses_api_agents/mini_swe_agent_2/.venv/bin/python \
+  git+https://github.com/dims/gym-substrate
+```
+
+Start the servers from the activated venv. Running them through `uv run`
 makes Ray's `uv run` hook demand a `pyproject.toml` inside the agent's directory and the
 `mini_swe_agent_2` server exits at startup.
+
+`connection.ateapi_addr` and `connection.atenet_addr` take any host:port that reaches
+the API Service and the router Service: the port-forwards below, or NodePort Services
+on the kind node (`172.18.0.2:30443` and `172.18.0.2:30080` in the arm64 runs) when
+local ports 8080 and 8081 are taken, as on BCM hosts.
 
 ```bash
 kubectl port-forward -n ate-system svc/api 8080:443 &
@@ -102,6 +114,10 @@ is installed in:
 ATEAPI_ADDR=localhost:8080 ATENET_ADDR=localhost:8000 \
   python scripts/smoke_provider.py python:3.12-slim pause_after_exec
 ```
+
+The image argument is the exact string the template was generated from
+(`localhost:5001/python:3.12-slim` for an image pushed to the kind registry), since
+the template name is derived from it.
 
 ## Authentication and trust
 
@@ -140,7 +156,7 @@ sandbox:
       concurrency: 32             # per provider instance; Gym makes one per sandbox
       capacity_retry_delay_s: 5
     probe:
-      timeout_s: 150              # above the router's --parked-request-budget
+      timeout_s: 660              # above the router's --parked-request-budget
 ```
 
 ### `suspend_policy`
