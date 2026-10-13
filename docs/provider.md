@@ -53,7 +53,8 @@ Last tested: the plugin at c02a7db against Substrate `main` f03327bd with those 
 ### Cluster
 
 Any Substrate install runs the provider; the settings below decide how many sandboxes
-it carries. Substrate's `docs/request-parking.md` has the router's mechanics and defaults.
+it carries. Substrate's [docs/request-parking.md](https://github.com/agent-substrate/substrate/blob/main/docs/request-parking.md)
+has the router's mechanics and defaults.
 
 **Router.** Four flags on the `atenet-router` Deployment:
 
@@ -74,7 +75,7 @@ it carries. Substrate's `docs/request-parking.md` has the router's mechanics and
 - `--extproc-max-requests` (default twice the lot) is Envoy's circuit breaker on the
   ext_proc cluster. Simultaneous requests above it get an Envoy 503 `overflow` with no
   actor reason in it, so the provider fails the step. Set it to the number of sandboxes
-  that may step at once; `8192` carried 1536 synchronized steps.
+  that may step at once; a run of 1536 sandboxes set it to `8192`.
 
 [agent-substrate/substrate#2560](https://github.com/agent-substrate/substrate/pull/2560)
 makes these install settings (`ATE_ATENET_ROUTE_TIMEOUT`,
@@ -95,10 +96,15 @@ kubectl -n ate-system rollout status deploy/atenet-router
 its template's cpu and memory limits from the worker's limits; requests are not counted.
 A slot is one actor of the template's size, so a worker of cpu 8 / 32 GiB holds eight
 actors of cpu 1 / 4 GiB. SWE-bench test suites peak at 2 to 4 GiB.
-`manifests/gym-workerpool.yaml` is such a pool; set `workerImage` to the install's
-`ateom-gvisor` image, which the demo pool shows after
-`hack/install-ate-kind.sh --deploy-demo-sandbox`:
-`kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool -o jsonpath='{.spec.workerImage}'`.
+`manifests/gym-workerpool.yaml` is such a pool in the demo's namespace, so deploy the demo
+first (`hack/install-ate-kind.sh --deploy-demo-sandbox` on kind); its pool shows the
+install's `ateom-gvisor` image, which fills the placeholder:
+
+```bash
+WI=$(kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool -o jsonpath='{.spec.workerImage}')
+sed "s#WORKER_IMAGE#$WI#" manifests/gym-workerpool.yaml | kubectl apply -f -
+```
+
 Templates made with `WORKLOAD=gym` select the pool by its label. With several nodes,
 create one pool per node with a `nodeSelector`: a paused actor's snapshot stays on its
 node and its next resume must land there.
@@ -145,35 +151,76 @@ before the swap never gets a golden snapshot.
 
 ### Templates
 
-The cluster needs one `ActorTemplate` per image. An `ActorTemplate` spec is
-immutable and an actor names a template rather than an image, so the set is
-built ahead of a run rather than on demand. `hack/gym-templates.sh` builds the
-agent image and the templates; pass each image as NeMo Gym will ask for it, with
-or without the `docker.io/` prefix, since both sides drop it before deriving the
-name:
+The cluster needs one `ActorTemplate` per image. An `ActorTemplate` spec is immutable and
+an actor names a template rather than an image, so the set is built ahead of a run.
+`hack/gym-templates.sh` builds the agent image with `ko` and creates the templates; run
+it from any directory, against the cluster `kubectl` points at:
 
 ```bash
-# against the cluster kubectl points at
-KO_DOCKER_REPO=<registry> BUCKET_NAME=<snapshot bucket> WORKLOAD=<pool label> \
-  ACTOR_CPU=1 ACTOR_MEMORY=4Gi hack/gym-templates.sh \
-  swebench/sweb.eval.x86_64.django_1776_django-11099:latest
+KO_DOCKER_REPO=<registry> BUCKET_NAME=<snapshot bucket> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
+  hack/gym-templates.sh swebench/sweb.eval.x86_64.django_1776_django-10973:latest
 ```
 
-The provider derives a template's name from the image it is asked for, so the
-two sides agree without a shared lookup table. That derivation is pinned by a
-unit test for a real SWE-bench image; if it changes, the generator must change
-with it.
+- `BUCKET_NAME` is the bucket the install keeps snapshots in (`ate-snapshots` on kind).
+  The script writes the location as `gs://<bucket>/<atespace>/`; Substrate reads the
+  bucket from the location's host whatever the backend. An existing template shows the
+  install's location under `snapshotConfig.storageLocation`
+  (`kubectl ate get actor-template -a ate-demo-sandbox -o yaml` after the demo).
+- `WORKLOAD` is the `workload` label of the pool the templates select: default `sandbox`,
+  Substrate's demo pool; `gym` for `manifests/gym-workerpool.yaml`. `ACTOR_CPU` (default
+  1) and `ACTOR_MEMORY` (default 1Gi) are the per-actor limits and set how many actors
+  share a worker; SWE-bench needs 4Gi. `ATESPACE` (default `nemo-gym`) is created when
+  missing. `AGENT_IMAGE` takes a digest-pinned agent image instead of a `ko` build.
+- Pass each image as Gym will ask for it, with or without the `docker.io/` prefix; both
+  sides drop it before deriving the template name. `mini_swe_agent_2` asks for a row's
+  `image_name`, or else `docker.io/swebench/sweb.eval.x86_64.<instance_id>:latest` in
+  lower case with `__` replaced by `_1776_`, so `django__django-10973` needs the image
+  above. Build a template for every row of the input you will run.
+- The script returns as soon as the template exists. The reconciler inside `ateapi` then
+  boots the image once and snapshots it; `kubectl ate get actor-template -a nemo-gym`
+  shows a golden tag when it is done, a few minutes for a fresh image. Wait for it before
+  creating sandboxes: an actor created earlier cold-boots instead of restoring.
+- A template is never updated. A rerun against a newer digest of the same image warns
+  and skips; delete the template to pick the new digest up.
+
+The provider derives a template's name from the image it is asked for, so the two sides
+agree without a shared lookup table. That derivation is pinned by a unit test for a real
+SWE-bench image; if it changes, the generator must change with it.
+
+### Live smoke
+
+`scripts/smoke_provider.py` runs one sandbox through create, the parked state, exec (a
+resume), a timeout, status, download and close. It needs the plugin and Gym's `nemo_gym`
+in one venv: the Gym venv once the plugin is installed (Run), or this repository's own
+`uv sync` venv, whose dev group has `nemo-gym`.
+
+```bash
+ATEAPI_ADDR=localhost:8080 ATENET_ADDR=localhost:8000 ATESPACE=nemo-gym \
+  python scripts/smoke_provider.py python:3.12-slim pause_after_exec
+```
+
+The image argument is the exact string the template was generated from
+(`localhost:5001/python:3.12-slim` for an image pushed to the kind registry), since the
+template name is derived from it. It ends with `RESULT PASS`.
 
 ### Run
 
-In a Gym checkout, build the environment with `uv sync --extra dev --extra sandbox`,
-then install this package into it with
-`uv pip install --no-deps git+https://github.com/dims/gym-substrate`.
-`--no-deps` matters: this package declares `nemo-gym` with a git source (for its own
-tests), and a plain install resolves that source and puts a second `nemo_gym` from Gym
-main into `site-packages`, which shadows the checkout's editable install for every
-console script such as `gym`. Install it after the last sync: a plain `uv sync` removes
-packages that are not in Gym's lock. A server that builds its own venv from a `requirements.txt` in its directory, as
+Gym needs Python 3.13.14 or later, and so does this package. In a Gym checkout, add the
+package to the project and build the environment:
+
+```bash
+uv add "gym-substrate @ git+https://github.com/dims/gym-substrate"
+uv sync --extra dev --extra sandbox
+```
+
+`uv add` records the package in the checkout's `pyproject.toml` and `uv.lock` (two local
+edits to keep out of a Gym commit) and resolves the client libraries Gym does not carry,
+such as `kubernetes`, inside Gym's lock, so later syncs keep everything. For a one-off,
+`uv pip install git+https://github.com/dims/gym-substrate` into the synced venv works too:
+the next plain `uv sync` removes it, and it moves a few of Gym's pinned packages to newer
+versions. Neither touches Gym's own `nemo-gym`, since this package does not depend on it.
+
+A server that builds its own venv from a `requirements.txt` in its directory, as
 `mini_swe_agent_2` does, resolves the provider inside that venv. With
 [NVIDIA-NeMo/Gym#4551](https://github.com/NVIDIA-NeMo/Gym/pull/4551) every distribution
 that publishes a `nemo_gym.sandbox_providers` entry point is installed there through
@@ -182,47 +229,52 @@ to that file, or install it there once the first `gym env start` has built the v
 (about a minute); Gym keeps the venv and only adds to it:
 
 ```bash
-uv pip install --no-deps --python responses_api_agents/mini_swe_agent_2/.venv/bin/python \
-  git+https://github.com/dims/gym-substrate
+uv pip install --python responses_api_agents/mini_swe_agent_2/.venv/bin/python git+https://github.com/dims/gym-substrate
 ```
 
-Start the servers from the activated venv. Running them through `uv run`
-makes Ray's `uv run` hook demand a `pyproject.toml` inside the agent's directory and the
-`mini_swe_agent_2` server exits at startup.
-
-`connection.ateapi_addr` and `connection.atenet_addr` take any host:port that reaches
-the `api` Service and the `atenet-router` Service: the port-forwards below for a smoke,
-the NodePorts of `manifests/nodeports.yaml` for a run (see Cluster). When local ports
-8080 and 8000 are taken, forward elsewhere and set both addresses.
+Gym selects the provider through the agent's `sandbox_provider` key: `mini_swe_agent_2`
+names `sandbox`, and the `sandbox:` block of `gym_substrate/configs/substrate.yaml` holds
+one provider key, `substrate`, plus `default_metadata`, which Gym merges into every
+sandbox's metadata (`sandbox-api: substrate-ateapi`; the provider does not read it). Copy
+that file, set the addresses, and give it to `gym env start` with the agent config and a
+model config. `responses_api_models/openai_model/configs/openai_model.yaml` is a model
+server for any OpenAI-compatible endpoint; it reads `policy_base_url`, `policy_api_key`
+and `policy_model_name` from an `env.yaml` in the checkout (the comparison below shows
+one). Start the servers from the activated venv: through `uv run`, Ray's `uv run` hook
+demands a `pyproject.toml` inside the agent's directory and the `mini_swe_agent_2` server
+exits at startup.
 
 ```bash
 kubectl port-forward -n ate-system svc/api 8080:443 &
 kubectl port-forward -n ate-system svc/atenet-router 8000:80 &
 
 source .venv/bin/activate
-gym env start "+config_paths=[responses_api_agents/mini_swe_agent_2/configs/mini_swe_agent_2.yaml,/path/to/gym-substrate/gym_substrate/configs/substrate.yaml,<model>.yaml]"
+gym env start "+config_paths=[responses_api_agents/mini_swe_agent_2/configs/mini_swe_agent_2.yaml,/path/to/substrate.yaml,responses_api_models/openai_model/configs/openai_model.yaml]"
 ```
 
-gVisor does not emulate, so an image must match the node architecture or the
-actor fails to start with `runsc start`: exit status 128. SWE-bench publishes
-`sweb.eval.x86_64.*` images and, for part of the instances, `sweb.eval.arm64.*`;
-on arm64 nodes map one to the other with the agent's `sandbox_spec.image_rewrites`
-(`from: docker.io/swebench/sweb.eval.x86_64.`, `to: <registry>/swebench/sweb.eval.arm64.`).
-
-### Live smoke
-
-`scripts/smoke_provider.py` runs one sandbox through create, the parked state,
-exec (a resume), a timeout, status, download and close, from the venv the plugin
-is installed in:
+Four `startup complete` lines in its output mean the head server and the three servers
+are up. One rollout of the first row of Gym's example input, from a second shell in the
+same venv:
 
 ```bash
-ATEAPI_ADDR=localhost:8080 ATENET_ADDR=localhost:8000 \
-  python scripts/smoke_provider.py python:3.12-slim pause_after_exec
+gym eval run --no-serve --agent mini_swe_agent_2 \
+  --input responses_api_agents/mini_swe_agent_2/data/example.jsonl --output out.jsonl --limit 1 --num-repeats 1
 ```
 
-The image argument is the exact string the template was generated from
-(`localhost:5001/python:3.12-slim` for an image pushed to the kind registry), since
-the template name is derived from it.
+It passes when the exit code is 0, `eval_error_rate` is 0, the output row has a reward,
+and `kubectl ate get actors -a nemo-gym` is empty afterwards.
+
+`connection.ateapi_addr` and `connection.atenet_addr` take any host:port that reaches
+the `api` Service and the `atenet-router` Service: the port-forwards above for a smoke,
+the NodePorts of `manifests/nodeports.yaml` for a run (see Cluster). When local ports
+8080 and 8000 are taken, forward elsewhere and set both addresses.
+
+gVisor does not emulate, so an image must match the node architecture or the actor fails
+to start with `runsc start`: exit status 128. SWE-bench publishes `sweb.eval.x86_64.*`
+images and, for part of the instances, `sweb.eval.arm64.*`; on arm64 nodes map one to the
+other with the agent's `sandbox_spec.image_rewrites`
+(`from: docker.io/swebench/sweb.eval.x86_64.`, `to: <registry>/swebench/sweb.eval.arm64.`)
+in an extra config file.
 
 ### A pause-against-never comparison
 
@@ -230,16 +282,26 @@ the template name is derived from it.
 think time (`--think-s` constant, or `--think-mean-s` exponential, seeded per rollout and
 turn; the counters restart on `POST /reset`), so a run needs no model. Point the model
 server at it with an `env.yaml` in the Gym checkout, then run one arm per provider config
-with `scripts/run_arm.sh`; the control arm is a copy of the config with
-`suspend_policy: never`:
+with `scripts/run_arm.sh` from the Gym checkout; the control arm is a copy of the config
+with `suspend_policy: never`. The arm count must exceed the pool's slots, or `never` wins
+by construction: 48 rollouts on the sample pool's 24 slots.
 
 ```bash
 printf 'policy_base_url: http://127.0.0.1:9797/v1\npolicy_api_key: replay\npolicy_model_name: replay\n' > env.yaml
 python /path/to/gym-substrate/scripts/replay_policy.py \
-  --rollouts responses_api_agents/mini_swe_agent_2/data/example_rollouts.jsonl --port 9797 --think-mean-s 15 &
-/path/to/gym-substrate/scripts/run_arm.sh ab12-pause /path/to/substrate.yaml 12
-/path/to/gym-substrate/scripts/run_arm.sh ab12-never /path/to/substrate-never.yaml 12
+  --rollouts responses_api_agents/mini_swe_agent_2/data/example_rollouts.jsonl --think-mean-s 15 &
+/path/to/gym-substrate/scripts/run_arm.sh ab48-pause /path/to/substrate.yaml 48
+/path/to/gym-substrate/scripts/run_arm.sh ab48-never /path/to/substrate-never.yaml 48
 ```
+
+`run_arm.sh` restarts the Gym servers itself: it kills the previous arm's servers by the
+ports in its own log and runs `ray stop --force`, so stop servers you started by hand
+first and run nothing else on Ray on that host. It refuses to start while actors are left
+in the atespace. Its environment: `GYM_DIR` (the Gym checkout; default the current
+directory), `INPUT` (the row to repeat; default the first row of `example.jsonl`, which
+the recorded rollouts cover), `RUN_DIR` and `LOG_DIR` (default `~/gym-run` and `~/logs`),
+`REPLAY_URL` (default `http://127.0.0.1:9797`), `EXTRA_CONFIGS` (config paths appended,
+such as an image-rewrites file), `ATESPACE` (default `nemo-gym`).
 
 Each arm prints the eval's exit code, the actors left behind, the rewards and the mean
 number of actors holding a worker. `manifests/grafana-sandbox-lifecycle.yaml` shows the
@@ -251,43 +313,68 @@ gaps, straight against the provider.
 
 ## Authentication and trust
 
-`ateapi` rejects unauthenticated calls. The provider mints a ServiceAccount
-token through the Kubernetes `TokenRequest` API, the same way `kubectl-ate`
-authenticates, using the local kubeconfig or in-cluster credentials. The
-serving CA is read from the cluster's `ClusterTrustBundle`.
+`ateapi` rejects unauthenticated calls. The provider mints a token for the ServiceAccount
+`ate-client` in `ate-system`, which the Substrate install creates, through the Kubernetes
+`TokenRequest` API, the same way `kubectl-ate` authenticates. The serving CA comes from
+the cluster's `ClusterTrustBundle` for the signer `servicedns.podcert.ate.dev/identity`.
+The kubeconfig it uses (the first entry of `KUBECONFIG`, else `~/.kube/config`, else
+in-cluster credentials) therefore needs `create` on `serviceaccounts/token` for that
+ServiceAccount and `list` on `clustertrustbundles`. `connection.token` replaces the minted
+token with one the caller manages, `connection.ca_cert_path` replaces the trust-bundle
+lookup with a PEM file, and `connection.service_account`, `service_account_namespace` and
+`ca_trust_bundle_signer` rename the three objects.
 
 Credentials are resolved inside the provider rather than through `${oc.env:...}`
-interpolation in the config block: the per-instance config is written to disk,
-so a token placed there would be written in plaintext, and it would not reach a
-remote worker anyway.
+interpolation in the config block: the per-instance config is written to disk, so a
+token placed there would be written in plaintext, and it would not reach a remote worker
+anyway.
 
-The data path is different. The router's ingress port is unauthenticated today
-and the in-actor server runs whatever it is sent, as root. Anyone who can reach
-the router Service and knows `<atespace>/<actor>` can run commands in that
-sandbox. Keep the router unexposed (a port-forward, or a NetworkPolicy that
-admits only the Gym servers) until Substrate's ingress authentication lands.
+The data path is different. The router's ingress port is unauthenticated today and the
+in-actor server runs whatever it is sent, as root. Anyone who can reach the router
+Service and knows `<atespace>/<actor>` can run commands in that sandbox. Keep the router
+unexposed (a port-forward, or a NetworkPolicy that admits only the Gym servers) until
+Substrate's ingress authentication lands.
 
 ## Configuration
 
+Every key with its default. The shipped `gym_substrate/configs/substrate.yaml` sets
+`suspend_policy: pause_after_exec`; the code's own default is `never`. Gym creates one
+provider instance per sandbox, so the limits below apply per sandbox unless a caller
+shares an instance.
+
 ```yaml
 sandbox:
+  default_metadata:
+    sandbox-api: substrate-ateapi   # merged into every sandbox's metadata by Gym; not read by the provider
   substrate:
     connection:
       ateapi_addr: localhost:8080
       atenet_addr: localhost:8000
       atespace: nemo-gym            # actors are created here
       template_namespace: nemo-gym  # templates are looked up here
+      tls_server_name: api.ate-system.svc   # the name on ateapi's certificate, also the token audience
+      ca_cert_path: null            # PEM of the serving CA; null reads the ClusterTrustBundle below
+      ca_trust_bundle_signer: servicedns.podcert.ate.dev/identity
+      service_account: ate-client
+      service_account_namespace: ate-system
+      token: null                   # a caller-managed bearer token instead of a minted one
+      grpc_timeout_s: 120           # per control call; also how long pause() waits for requests in flight
+      http_max_connections: null    # connections to the router at once; null is unlimited
     create:
       ready_timeout_s: 1200         # create() and resume() wait this long for the actor to answer
       ready_queue_timeout_s: 3600   # and this long more while the router queues the probe for a worker slot
-      suspend_policy: pause_after_exec   # never | after_exec | pause_after_exec
+      suspend_policy: never         # never | after_exec | pause_after_exec
       idle_before_suspend_s: 1.0
+      delete_on_close: true         # false suspends on close() instead and keeps the sandbox for inspection
     exec:
       default_timeout_s: 1800
-      concurrency: 32             # per provider instance; Gym makes one per sandbox
+      concurrency: 32               # requests to the router at once, per provider instance
       capacity_retry_delay_s: 5
     probe:
-      timeout_s: 660              # above the router's --parked-request-budget (10 min, see Cluster)
+      path: /readyz
+      timeout_s: 660                # above the router's --parked-request-budget (10 min, see Cluster)
+      stable_count: 1               # consecutive 200s before the actor counts as ready
+      stable_delay_s: 1.0
 ```
 
 ### `suspend_policy`
@@ -365,7 +452,7 @@ from runs at one to four times the slots:
   the provider fails the step. Desynchronize the steps or raise the breaker.
 - **Control calls fail transiently under bursts.** ateapi answers `ABORTED` (lease held,
   version conflict), `UNAVAILABLE` (restart) and `INTERNAL` (PostgreSQL out of
-  connections); the provider retries five times with backoff, about eight seconds in all.
+  connections); the provider makes five attempts with backoff, about eight seconds in all.
 - **A paused actor is pinned to its node.** Its snapshot lives under that node's
   `/var/lib/ate`; a drain or a pool rollout loses it. Suspend every actor first.
 - **A dead sandbox is a `RUNNING` actor.** Substrate does not notice the application

@@ -1,6 +1,6 @@
 # Sandbox agent HTTP contract
 
-The agent listens on `PORT` (default `80`) inside the actor. Clients reach it through the Substrate router with the `ate-target-actor: <atespace>/<actor>` header; the router resumes a suspended or paused actor before forwarding. Commands run through the shell named by `SANDBOX_SHELL` (default `/bin/sh`), as the one identity the actor runs as.
+The agent listens on `PORT` (default `80`) inside the actor. Clients reach it through the Substrate router with the `ate-target-actor: <atespace>/<actor>` header; the router resumes a suspended or paused actor before forwarding. Commands run through the shell named by `SANDBOX_SHELL`, else `bash` when the image has it, else `sh`, as the one identity the actor runs as.
 
 ## `GET /readyz`
 

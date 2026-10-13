@@ -77,7 +77,7 @@ worker has room for the actor`. A request that arrives when `--parked-request-ma
 already parked gets 503 `router at capacity` at once. A flight that outruns its deadline
 answers an empty 504. Once the actor runs, Envoy forwards the request to the worker pod
 over mTLS and the worker's ingress proxy hands it to the agent on the actor's address.
-Details: Substrate's `docs/request-parking.md`.
+Details: Substrate's [docs/request-parking.md](https://github.com/agent-substrate/substrate/blob/main/docs/request-parking.md).
 
 ## Sequences
 
@@ -227,7 +227,7 @@ sequenceDiagram
     T->>T: acquire actor.lock
     T->>A: PauseActor
     A-->>T: OK (or DEADLINE_EXCEEDED: ateapi keeps working, wait up to grpc_timeout_s)
-    loop GetActor every 0.25 s
+    loop GetActor every 0.25 s, at most 30 s (grpc_timeout_s after a deadline overrun)
       A-->>T: PAUSING, then PAUSED
     end
     T->>T: parked = true, release actor.lock
@@ -249,7 +249,8 @@ Rules the code enforces:
   that outruns the client deadline is waited out through `GetActor` instead of being
   failed or re-sent.
 - A failed pause costs density, not correctness: the actor stays running and the next
-  command still works.
+  command still works. A park still mid-transition after 30 s is left to the control
+  plane with a warning, and the next park retries.
 - `aclose()` waits for every idle task and every background cleanup before closing the
   gRPC channel.
 
@@ -293,7 +294,7 @@ sequenceDiagram
   C->>P: pause(handle)
   P->>P: cancel a pending idle task, wait until no request is in flight (at most grpc_timeout_s)
   P->>A: PauseActor, or SuspendActor if the worker is being evicted
-  loop GetActor every 0.25 s
+  loop GetActor every 0.25 s, at most 30 s
     A-->>P: PAUSING, then PAUSED
   end
   P-->>C: returns once parked, raises if the actor is not parked
@@ -321,7 +322,7 @@ stateDiagram-v2
   RESUMING --> CRASHED: probe timeout, atelet error
   RUNNING --> PAUSING: PauseActor from the provider once idle
   PAUSING --> PAUSED: local checkpoint written, slot freed
-  RUNNING --> SUSPENDING: SuspendActor on eviction, after_exec policy, or close without delete
+  RUNNING --> SUSPENDING: SuspendActor on eviction, after_exec policy, or close with delete_on_close false
   PAUSED --> SUSPENDING: SuspendActor uploads the paused checkpoint
   SUSPENDING --> SUSPENDED: snapshot in object storage
   RUNNING --> CRASHED: worker pod gone, ateom restarted

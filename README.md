@@ -13,14 +13,16 @@ The pieces that connect [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) sandboxes
 
 ## Install the provider
 
+In a Gym checkout (Python 3.13.14 or later, as Gym requires):
+
 ```bash
-uv pip install --no-deps git+https://github.com/dims/gym-substrate
+uv add "gym-substrate @ git+https://github.com/dims/gym-substrate"
+uv sync --extra dev --extra sandbox
 ```
 
-`--no-deps` keeps the Gym checkout's own `nemo-gym`; without it the install pulls a
-second `nemo_gym` from Gym main that shadows the editable one (see `docs/provider.md`).
+`uv add` records the package in the checkout's `pyproject.toml` and `uv.lock`, so a later `uv sync` keeps it; `uv pip install git+https://github.com/dims/gym-substrate` into the venv works for a one-off, until the next sync.
 
-Gym then resolves `provider: {substrate: {...}}` in a sandbox config through the entry point; `gym_substrate/configs/substrate.yaml` is a starting config.
+Gym selects the provider through the agent's `sandbox_provider` key, which names a block like the `sandbox:` block of `gym_substrate/configs/substrate.yaml`; its one provider key, `substrate`, is resolved through the entry point. Copy that file and set the addresses (see `docs/provider.md`).
 
 ## Build and test
 
@@ -37,10 +39,11 @@ uv sync && uv run pytest
 With a Substrate install and `kubectl-ate` on the path:
 
 ```bash
-BUCKET_NAME=<snapshot bucket> KO_DOCKER_REPO=<registry> hack/gym-templates.sh python:3.12-slim <image>...
+BUCKET_NAME=<snapshot bucket> KO_DOCKER_REPO=<registry> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
+  hack/gym-templates.sh python:3.12-slim <image>...
 ```
 
-Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label the templates select, default `sandbox`), `ACTOR_CPU` and `ACTOR_MEMORY` (per-actor limits, default cpu 1), `AGENT_IMAGE` (a digest-pinned agent image instead of a `ko` build).
+Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label the templates select, default `sandbox`, Substrate's demo pool), `ACTOR_CPU` and `ACTOR_MEMORY` (per-actor limits, defaults 1 and 1Gi; SWE-bench needs 4Gi), `AGENT_IMAGE` (a digest-pinned agent image instead of a `ko` build). `docs/provider.md` explains the bucket, the pool and the golden snapshot to wait for.
 
 ## Scripts and manifests
 
