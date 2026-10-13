@@ -552,6 +552,37 @@ async def test_control_retries_aborted(monkeypatch: pytest.MonkeyPatch) -> None:
     assert attempts == 3
 
 
+async def test_control_retries_internal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(substrate_provider, "_CONTROL_BACKOFF_S", 0.0)
+    provider = substrate_provider.SubstrateProvider(connection={"atespace": "swebench", "token": "t"})
+    attempts = 0
+
+    class _Stub:
+        async def CreateActor(self, request: Any, *, metadata: Any, timeout: Any) -> Any:  # noqa: N802
+            nonlocal attempts
+            attempts += 1
+            if attempts < 2:
+                raise _grpc_error(grpc.StatusCode.INTERNAL, "failed to acquire a connection: too many clients")
+            return ateapi_pb2.Actor()
+
+    provider._stub = _Stub()
+    await provider._control("CreateActor", ateapi_pb2.CreateActorRequest())
+
+    assert attempts == 2
+
+
+async def test_control_does_not_retry_not_found() -> None:
+    provider = substrate_provider.SubstrateProvider(connection={"atespace": "swebench", "token": "t"})
+
+    class _Stub:
+        async def GetActor(self, request: Any, *, metadata: Any, timeout: Any) -> Any:  # noqa: N802
+            raise _grpc_error(grpc.StatusCode.NOT_FOUND, "actor not found")
+
+    provider._stub = _Stub()
+    with pytest.raises(grpc.aio.AioRpcError):
+        await provider._control("GetActor", ateapi_pb2.GetActorRequest())
+
+
 async def test_close_deletes_in_any_state() -> None:
     recorder = _Recorder()
     provider = _make_provider(recorder)

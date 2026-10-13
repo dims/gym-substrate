@@ -47,7 +47,9 @@ TEMPLATE_DIGEST_LENGTH = 16
 # ateapi answers ABORTED on an optimistic-concurrency conflict ("please retry")
 # and UNAVAILABLE while it restarts; both are safe to retry for every RPC the
 # provider sends.
-_RETRYABLE_CONTROL_CODES = (grpc.StatusCode.ABORTED, grpc.StatusCode.UNAVAILABLE)
+# INTERNAL is included because ateapi answers it for a transient store failure,
+# such as PostgreSQL out of connection slots under a burst of control calls.
+_RETRYABLE_CONTROL_CODES = (grpc.StatusCode.ABORTED, grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.INTERNAL)
 _CONTROL_ATTEMPTS = 5
 _CONTROL_BACKOFF_S = 0.5
 
