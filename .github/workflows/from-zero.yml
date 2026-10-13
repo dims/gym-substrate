@@ -1,0 +1,61 @@
+# The whole pass on a runner: hack/rerun-all.sh from a bare host to a passing gate, with the
+# plugin from this checkout. Daily, and on demand with a runner and an instance of choice.
+name: from zero
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: runner label
+        default: ubuntu-latest
+      gate_instance:
+        description: SWE-bench instance for the gate rollout (its image must be public for the runner's architecture)
+        default: scikit-learn__scikit-learn-14141
+jobs:
+  from-zero:
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: astral-sh/setup-uv@v5
+      - name: Tools and host settings
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq psmisc zstd jq
+          go install sigs.k8s.io/kind@v0.33.0
+          go install github.com/google/ko@v0.19.1
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+      - name: Room for the task image
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+      - name: From zero
+        env:
+          GYM_SUBSTRATE_SOURCE: ${{ github.workspace }}
+          GATE_INSTANCE: ${{ inputs.gate_instance || 'scikit-learn__scikit-learn-14141' }}
+          POOL_REPLICAS: '1'
+          POOL_CPU: '2'
+          POOL_MEMORY: '6Gi'
+        run: hack/rerun-all.sh
+      - name: Diagnostics
+        if: failure()
+        run: |
+          export PATH="$HOME/gym-substrate-run/bin:$PATH"
+          kubectl -n ate-system get pods -o wide || true
+          kubectl ate get actors -a nemo-gym || true
+          kubectl ate get workers || true
+          tail -n 60 ~/gym-substrate-run/logs/gym-env.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: from-zero-logs
+          path: |
+            ~/gym-substrate-run/logs
+            ~/gym-substrate-run/run/*.txt
+          if-no-files-found: ignore

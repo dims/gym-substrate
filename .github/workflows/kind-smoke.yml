@@ -1,0 +1,65 @@
+# Substrate on kind, the templates and the live provider smoke, on an amd64 and an arm64
+# runner: the from-zero scripts without the Gym rollout.
+name: kind smoke
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md']
+  pull_request:
+    paths-ignore: ['docs/**', '**.md']
+  workflow_dispatch:
+concurrency:
+  group: kind-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: astral-sh/setup-uv@v5
+      - name: Tools and host settings
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq psmisc zstd jq
+          go install sigs.k8s.io/kind@v0.33.0
+          go install github.com/google/ko@v0.19.1
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
+          # x86-64 runners expose /dev/kvm once this rule exists; kind mounts it when present.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+      - run: hack/host-check.sh
+      - name: Substrate on kind
+        run: POOL_REPLICAS=1 POOL_CPU=2 POOL_MEMORY=3Gi hack/kind-up.sh
+      - name: Image and template
+        run: |
+          hack/images.sh python:3.12-slim
+          KO_DOCKER_REPO=localhost:5001 BUCKET_NAME=ate-snapshots WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=1Gi WAIT_GOLDEN=1 \
+            hack/gym-templates.sh "$(cat ~/gym-substrate-run/run/images.txt)"
+      - name: Live smoke
+        run: |
+          uv sync
+          NODE_IP=$(cat ~/gym-substrate-run/run/node-ip)
+          ATEAPI_ADDR=$NODE_IP:30443 ATENET_ADDR=$NODE_IP:30080 uv run python scripts/smoke_provider.py localhost:5001/python:3.12-slim pause_after_exec | tee smoke.out
+          grep -q '^RESULT PASS' smoke.out
+      - name: Diagnostics
+        if: failure()
+        run: |
+          export PATH="$HOME/gym-substrate-run/bin:$PATH"
+          kubectl -n ate-system get pods -o wide || true
+          kubectl ate get actors -a nemo-gym || true
+          kubectl ate get actor-template -a nemo-gym || true
+          kubectl -n ate-system logs deploy/ate-api-server -c ate-api-server --tail=100 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-${{ matrix.runner }}
+          path: ~/gym-substrate-run/logs
+          if-no-files-found: ignore

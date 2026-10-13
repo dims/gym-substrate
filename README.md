@@ -45,6 +45,10 @@ BUCKET_NAME=<snapshot bucket> KO_DOCKER_REPO=<registry> WORKLOAD=gym ACTOR_CPU=1
 
 Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label the templates select, default `sandbox`, Substrate's demo pool), `ACTOR_CPU` and `ACTOR_MEMORY` (per-actor limits, defaults 1 and 1Gi; SWE-bench needs 4Gi), `AGENT_IMAGE` (a digest-pinned agent image instead of a `ko` build). `docs/provider.md` explains the bucket, the pool and the golden snapshot to wait for.
 
+## CI
+
+`ci.yml` lints and tests on every change. `kind-smoke.yml` brings Substrate up on kind on an amd64 and an arm64 runner, builds a template and runs the live smoke (about 20 minutes, skipped for docs-only changes). `from-zero.yml` runs `hack/rerun-all.sh` end to end with a Gym rollout, daily and on demand.
+
 ## Scripts and manifests
 
 - `scripts/smoke_provider.py`: one sandbox through the provider against a live cluster.
