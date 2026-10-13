@@ -14,6 +14,8 @@
 # limitations under the License.
 
 import asyncio
+import logging
+import re
 from typing import Any
 
 import grpc
@@ -115,7 +117,13 @@ class _Recorder:
         return [rpc for rpc, _ in self.control_calls]
 
 
-def _make_provider(recorder: _Recorder, *, suspend_policy: str = "never", idle_before_suspend_s: float = 0.0) -> Any:
+def _make_provider(
+    recorder: _Recorder,
+    *,
+    suspend_policy: str = "never",
+    idle_before_suspend_s: float = 0.0,
+    exec_config: dict[str, Any] | None = None,
+) -> Any:
     provider = substrate_provider.SubstrateProvider(
         connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE},
         create={
@@ -124,7 +132,7 @@ def _make_provider(recorder: _Recorder, *, suspend_policy: str = "never", idle_b
             # A short, delay-free probe keeps the test fast.
             "ready_timeout_s": 5.0,
         },
-        exec={"capacity_retry_delay_s": 0.0},
+        exec={"capacity_retry_delay_s": 0.0, **(exec_config or {})},
         probe={"stable_delay_s": 0.0},
     )
     provider._control = recorder.control  # type: ignore[method-assign]
@@ -134,6 +142,17 @@ def _make_provider(recorder: _Recorder, *, suspend_policy: str = "never", idle_b
 
 def _grpc_error(code: grpc.StatusCode, details: str) -> grpc.aio.AioRpcError:
     return grpc.aio.AioRpcError(code, grpc.aio.Metadata(), grpc.aio.Metadata(), details=details)
+
+
+def _provider_log(caplog: pytest.LogCaptureFixture, level: int) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == substrate_provider.LOGGER.name and r.levelno == level]
+
+
+def _capacity_retries(message: str) -> int:
+    """The retry count a capacity WARNING reports."""
+    match = re.search(r"after (\d+) capacity retries", message)
+    assert match is not None, message
+    return int(match.group(1))
 
 
 def test_template_name_is_deterministic_and_scheme_stripped() -> None:
@@ -721,6 +740,81 @@ async def test_exec_retries_a_bare_504_like_a_capacity_503() -> None:
 
     assert result.return_code == 0 and result.error_type is None
     assert execs == 3
+
+
+async def test_capacity_retries_warn_at_the_threshold_then_at_each_doubling(caplog: pytest.LogCaptureFixture) -> None:
+    recorder = _Recorder()
+    provider = _make_provider(recorder, exec_config={"capacity_warn_after_retries": 2})
+    execs = 0
+
+    def router(request: httpx.Request) -> httpx.Response:
+        nonlocal execs
+        if request.url.path != "/exec":
+            return httpx.Response(200)
+        execs += 1
+        if execs <= 9:
+            return httpx.Response(503, text='actor "swebench/gym-x" unavailable: router at capacity')
+        return httpx.Response(200, json={"stdout": "ok", "stderr": "", "exit_code": 0})
+
+    provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+
+    with caplog.at_level(logging.INFO, logger=substrate_provider.LOGGER.name):
+        result = await provider.exec(handle, "true", timeout_s=5)
+
+    assert (result.return_code, execs) == (0, 10)
+    # Nine retries, each still an INFO line; a WARNING at the second, fourth
+    # and eighth that names the actor, and none for giving up.
+    assert sum("not routable yet" in m for m in _provider_log(caplog, logging.INFO)) == 9
+    warnings = _provider_log(caplog, logging.WARNING)
+    assert [_capacity_retries(m) for m in warnings] == [2, 4, 8]
+    assert all(handle.sandbox_id in m and "gave up" not in m for m in warnings)
+
+
+@pytest.mark.parametrize(
+    "last_answer, delay_s, timeout_s",
+    [
+        # The router keeps answering 503 until the budget has no room for another retry.
+        ("capacity 503", 0.05, 0.1),
+        # The router is still holding the parked request when the client's budget runs out.
+        ("client timeout", 0.0, 5.0),
+    ],
+)
+async def test_exec_warns_when_it_gives_up_after_capacity_retries(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    last_answer: str,
+    delay_s: float,
+    timeout_s: float,
+) -> None:
+    monkeypatch.setattr(substrate_provider, "_EXEC_REPLY_GRACE_S", 0.0)
+    recorder = _Recorder()
+    provider = _make_provider(recorder, exec_config={"capacity_retry_delay_s": delay_s})
+    execs = 0
+
+    def router(request: httpx.Request) -> httpx.Response:
+        nonlocal execs
+        if request.url.path != "/exec":
+            return httpx.Response(200)
+        execs += 1
+        if last_answer == "client timeout" and execs == 3:
+            raise httpx.ReadTimeout("parked past the budget", request=request)
+        return httpx.Response(503, text='actor "swebench/gym-x" unavailable: router at capacity')
+
+    provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+
+    with caplog.at_level(logging.WARNING, logger=substrate_provider.LOGGER.name):
+        result = await provider.exec(handle, "true", timeout_s=timeout_s)
+
+    assert (result.return_code, result.stdout) == (substrate_provider.SANDBOX_RUNTIME_RETURN_CODE, None)
+    assert result.error_type == ("timeout" if last_answer == "client timeout" else "sandbox")
+    warnings = _provider_log(caplog, logging.WARNING)
+    assert len(warnings) == 1 and "gave up" in warnings[0] and handle.sandbox_id in warnings[0]
+    # The first attempt, plus one per retry the line counts.
+    assert execs == _capacity_retries(warnings[0]) + 1 >= 2
 
 
 async def test_failed_create_cleanup_keeps_deleting_in_the_background(monkeypatch: pytest.MonkeyPatch) -> None:

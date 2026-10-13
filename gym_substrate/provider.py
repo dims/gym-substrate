@@ -75,6 +75,11 @@ _TRANSIENT_MARKERS = (
 _TRANSITION_RETRY_DELAY_S = 1.0
 _TRANSIENT_RETRY_BUDGET_S = 60.0
 
+# An exec's request budget exceeds the command's own timeout by this much, so
+# the agent gets to report a timeout itself rather than the client giving up
+# first and losing the output.
+_EXEC_REPLY_GRACE_S = 30.0
+
 # After a failed create the actor's resume flight can still hold its lease, so
 # DeleteActor answers ABORTED ("another operation is in progress"). The flight
 # ends by the router's parking budget; the delete is retried in the background
@@ -163,6 +168,19 @@ def _classify_unavailable(response: httpx.Response) -> str | None:
     if any(marker in text for marker in _TRANSIENT_MARKERS) or text.rstrip().endswith("unavailable"):
         return "transient"
     return None
+
+
+def _warn_gave_up(actor_name: str, path: str, retries: int, waited_s: float, budget_s: float, reason: str) -> None:
+    """Say that a request waited for a worker slot and then failed without reaching the actor."""
+    LOGGER.warning(
+        "substrate: %s gave up on %s after %d capacity retries and %.0fs (budget %.0fs): %s",
+        actor_name,
+        path,
+        retries,
+        waited_s,
+        budget_s,
+        reason,
+    )
 
 
 def _read_kube_config() -> dict[str, Any]:
@@ -272,9 +290,17 @@ class SubstrateExecConfig:
     # immediate retry would only park again.
     capacity_retry_delay_s: float = 5.0
 
+    # Each such retry is logged at INFO, which a Gym env log drops. Once one
+    # request has been resent this many times, a WARNING says how long it has
+    # waited, again each time the count doubles, and once more if the request
+    # gives up at its budget.
+    capacity_warn_after_retries: int = 3
+
     def __post_init__(self) -> None:
         if self.concurrency < 1:
             raise ValueError("exec.concurrency must be >= 1")
+        if self.capacity_warn_after_retries < 1:
+            raise ValueError("exec.capacity_warn_after_retries must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -524,19 +550,25 @@ class SubstrateProvider:
 
         loop = asyncio.get_running_loop()
         budget = timeout_s if timeout_s is not None else (self._exec_config.default_timeout_s or 1800.0)
-        deadline = loop.time() + budget
-        transient_deadline = loop.time() + min(budget, _TRANSIENT_RETRY_BUDGET_S)
+        started = loop.time()
+        deadline = started + budget
+        transient_deadline = started + min(budget, _TRANSIENT_RETRY_BUDGET_S)
+        gate = self._semaphore if limited else contextlib.nullcontext()
+        capacity_retries = 0
+        warn_at = self._exec_config.capacity_warn_after_retries
         while True:
             remaining = max(deadline - loop.time(), 1.0)
-            if limited:
-                async with self._semaphore:
+            try:
+                async with gate:
                     response = await self._http_client.request(
                         method, path, headers=headers, json=json, content=content, params=params, timeout=remaining
                     )
-            else:
-                response = await self._http_client.request(
-                    method, path, headers=headers, json=json, content=content, params=params, timeout=remaining
-                )
+            except httpx.HTTPError as e:
+                # On a saturated host the last attempt is usually parked at the
+                # router for longer than what was left of the budget.
+                if capacity_retries:
+                    _warn_gave_up(actor.name, path, capacity_retries, loop.time() - started, budget, repr(e))
+                raise
             kind = _classify_unavailable(response) if retry else None
             if kind is None:
                 return response
@@ -545,7 +577,23 @@ class SubstrateProvider:
             else:
                 delay, limit = _TRANSITION_RETRY_DELAY_S, transient_deadline
             if loop.time() + delay >= limit:
+                if kind == "capacity" or capacity_retries:
+                    reason = f"router returned {response.status_code}: {response.text.strip()}"
+                    _warn_gave_up(actor.name, path, capacity_retries, loop.time() - started, budget, reason)
                 return response
+            if kind == "capacity":
+                capacity_retries += 1
+                if capacity_retries >= warn_at:
+                    LOGGER.warning(
+                        "substrate: %s still has no worker slot for %s after %d capacity retries and %.0fs "
+                        "(budget %.0fs)",
+                        actor.name,
+                        path,
+                        capacity_retries,
+                        loop.time() - started,
+                        budget,
+                    )
+                    warn_at *= 2
             LOGGER.info("substrate: %s not routable yet (%s); retrying in %.0fs", actor.name, path, delay)
             await asyncio.sleep(delay)
 
@@ -733,10 +781,7 @@ class SubstrateProvider:
         if effective_timeout is not None:
             payload["timeout_s"] = float(effective_timeout)
 
-        # The request budget exceeds the command's own timeout so the agent gets
-        # to report a timeout itself, rather than the client giving up first and
-        # losing the output.
-        request_timeout = None if effective_timeout is None else float(effective_timeout) + 30.0
+        request_timeout = None if effective_timeout is None else float(effective_timeout) + _EXEC_REPLY_GRACE_S
 
         async with self._in_flight(actor):
             try:

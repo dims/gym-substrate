@@ -22,6 +22,14 @@ reached the actor. A 503 for an actor mid-transition or a control-plane
 conflict is retried for about a minute; one that names a crashed or deleted
 actor, or that the provider cannot explain, fails the step at once.
 
+Each retry is an INFO line, which a Gym env log drops. Once one request has
+been retried `exec.capacity_warn_after_retries` times, the provider logs a
+WARNING that names the actor, the retry count and the time waited so far, and
+logs another each time the count doubles. A request that still has no slot
+when its budget runs out fails the step with return code 125 and no output;
+the provider then logs a WARNING with the same counts, so a log capture can
+grep for `gave up` and count those steps.
+
 The in-actor server is this repository's `cmd/sandbox-agent`. It is static, so an
 `ActorTemplate` mounts its image as a read-only image volume into the benchmark
 image, which runs untouched, and sets it as the container command.
@@ -412,6 +420,7 @@ sandbox:
       default_timeout_s: 1800
       concurrency: 32               # requests to the router at once, per provider instance
       capacity_retry_delay_s: 5
+      capacity_warn_after_retries: 3   # WARNING after this many capacity retries on one request, then at each doubling
     probe:
       path: /readyz
       timeout_s: 660                # above the router's --parked-request-budget (10 min, see Cluster)

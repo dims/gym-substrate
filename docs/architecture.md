@@ -349,7 +349,7 @@ stateDiagram-v2
 | No template for the image | `CreateActor` NOT_FOUND | `SubstrateCreateError` naming the template and image |
 | Pool full at create | probe parked, then 503 capacity or an empty 504 | the probe loop goes on; time queued counts against `ready_queue_timeout_s`, time probing against `ready_timeout_s`; then `SubstrateCreateVerificationError` and the actor is deleted |
 | Delete after a failed create refused | `DeleteActor` ABORTED while the parked probe's resume flight holds the lease | retried in the background every 15 s for up to 15 min; `aclose()` waits for it |
-| Pool full at a step | 503 `no worker has room` after the park, `router at capacity` at once, or an empty 504 | retried every `capacity_retry_delay_s` until the request budget (command timeout plus 30 s), then return code 125 |
+| Pool full at a step | 503 `no worker has room` after the park, `router at capacity` at once, or an empty 504 | retried every `capacity_retry_delay_s` until the request budget (command timeout plus 30 s), then return code 125; a WARNING once one request has been retried `exec.capacity_warn_after_retries` times, at each doubling, and when it gives up |
 | Actor mid-transition or lease held | 503 `got: ACTOR_STATE_PAUSING`, `another operation is in progress`, `please retry` | retried every second for 60 s, then return code 125 |
 | Actor crashed or deleted | 503 with a terminal reason | the step fails at once: return code 125, `error_type` `sandbox` |
 | Envoy breaker | 503 `overflow`, no actor reason | the step fails at once; raise `--extproc-max-requests` or desynchronize steps |
