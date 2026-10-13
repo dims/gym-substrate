@@ -1,0 +1,22 @@
+# Eight cpu 1 / 4Gi actors per worker; templates made with WORKLOAD=gym select it.
+# Set workerImage to the install's ateom-gvisor image (docs/provider.md, Cluster).
+apiVersion: ate.dev/v1alpha1
+kind: WorkerPool
+metadata:
+  name: gym-workerpool
+  namespace: ate-demo-sandbox
+  labels:
+    workload: gym
+spec:
+  replicas: 3
+  sandboxClasses:
+  - name: gvisor
+  template:
+    resources:
+      limits:
+        cpu: "8"
+        memory: 32Gi
+      requests:
+        cpu: "1"
+        memory: 16Gi
+  workerImage: WORKER_IMAGE

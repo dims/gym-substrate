@@ -52,19 +52,96 @@ Last tested: the plugin at c02a7db against Substrate `main` f03327bd with those 
 
 ### Cluster
 
-Any Substrate install works; two settings matter for this workload.
+Any Substrate install runs the provider; the settings below decide how many sandboxes
+it carries. Substrate's `docs/request-parking.md` has the router's mechanics and defaults.
 
-- **Router timeouts.** `atenet-router` bounds one request by `--route-timeout`
-  (default 5 min) and holds a request waiting for a worker for
-  `--parked-request-budget` (default 5 s). Set the first above the longest
-  exec you allow (`exec.default_timeout_s`, and mini-swe-agent's
-  `eval_timeout`) and the second to how long a step may wait for a slot, for
-  example `--route-timeout=1830s --parked-request-budget=120s`.
-- **Pool sizing.** A worker hosts several actors at once; each actor subtracts
-  its template's cpu and memory limits from the worker's capacity. Size the
-  `WorkerPool` and the templates together: SWE-bench test suites peak at 2 to
-  4 GiB, so a 12 GiB worker holds three 4 GiB actors, and the sandboxes beyond
-  that wait in the router until one is paused.
+**Router.** Four flags on the `atenet-router` Deployment:
+
+- `--route-timeout` (default 5 min) bounds one request end to end. Set it above the
+  longest exec you allow (`exec.default_timeout_s` and `mini_swe_agent_2`'s
+  `eval_timeout`, both 1800 s): `30m30s`. A command that outruns it gets a 504 while it
+  keeps running in the sandbox.
+- `--parked-request-budget` (default 5 s) is how long the router holds a request whose
+  actor has no free slot before it answers 503; the provider then waits
+  `exec.capacity_retry_delay_s` and sends the request again, at the back of the lot.
+  With more sandboxes than slots, set it to how long a step may wait for a slot: `10m`.
+  Two minutes was too short at twice the slots; every second-wave request cycled
+  through 503 and retry. `probe.timeout_s` must stay above the budget (660 s here), or
+  the client cuts a parked readiness probe and parks it again.
+- `--parked-request-max` (default 1024) is the parking lot. A request beyond it gets 503
+  `router at capacity` at once, which the provider retries after
+  `capacity_retry_delay_s`. Size it to the sandboxes beyond the slots.
+- `--extproc-max-requests` (default twice the lot) is Envoy's circuit breaker on the
+  ext_proc cluster. Simultaneous requests above it get an Envoy 503 `overflow` with no
+  actor reason in it, so the provider fails the step. Set it to the number of sandboxes
+  that may step at once; `8192` carried 1536 synchronized steps.
+
+[agent-substrate/substrate#2560](https://github.com/agent-substrate/substrate/pull/2560)
+makes these install settings (`ATE_ATENET_ROUTE_TIMEOUT`,
+`ATE_ATENET_PARKED_REQUEST_BUDGET`, `ATE_ATENET_EXTPROC_MAX_REQUESTS`) and sizes the
+router's grace period with the budget. Until it merges, patch the Deployment after every
+install, since a reinstall reverts it; a router rollout then cuts parked requests,
+because the grace period is not raised:
+
+```bash
+kubectl -n ate-system patch deploy atenet-router --type=json -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--route-timeout=30m30s"},
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--parked-request-budget=10m"},
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--extproc-max-requests=8192"}]'
+kubectl -n ate-system rollout status deploy/atenet-router
+```
+
+**Workers and templates.** A worker hosts several actors at once. Each actor subtracts
+its template's cpu and memory limits from the worker's limits; requests are not counted.
+A slot is one actor of the template's size, so a worker of cpu 8 / 32 GiB holds eight
+actors of cpu 1 / 4 GiB. SWE-bench test suites peak at 2 to 4 GiB.
+`manifests/gym-workerpool.yaml` is such a pool; set `workerImage` to the install's
+`ateom-gvisor` image, which the demo pool shows after
+`hack/install-ate-kind.sh --deploy-demo-sandbox`:
+`kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool -o jsonpath='{.spec.workerImage}'`.
+Templates made with `WORKLOAD=gym` select the pool by its label. With several nodes,
+create one pool per node with a `nodeSelector`: a paused actor's snapshot stays on its
+node and its next resume must land there.
+
+**Control plane under load.** Hundreds of sandboxes per node starve the control-plane
+pods that share the nodes. Until
+[#2557](https://github.com/agent-substrate/substrate/pull/2557),
+[#2496](https://github.com/agent-substrate/substrate/pull/2496) and
+[#2493](https://github.com/agent-substrate/substrate/pull/2493) merge: give
+`ate-api-server`, `atenet-router`, `atenet-egress`, `ate-controller` and `atelet` CPU
+requests and probes of 5 s with a failure threshold of 6; give postgres probe timeouts of
+5 s (readiness) and 10 s (liveness), `max_connections=500` and a CPU request; start
+ateapi with `--postgres-pool-max-conns=20` (the default is one connection per CPU per
+replica) and four replicas. On kind, keep the stateless control-plane pods on the
+control-plane node with a `nodeSelector` and a toleration, so no sandbox runs beside
+them. Patch between runs, never while actors exist.
+
+**Reaching the cluster.** `connection.ateapi_addr` and `connection.atenet_addr` take any
+host:port that reaches the `api` Service (gRPC over TLS, 443) and the `atenet-router`
+Service (HTTP, 80). A port-forward serves a smoke. For a run, apply
+`manifests/nodeports.yaml` (30443 and 30080 on every node): `kubectl port-forward`
+collapsed under load and cancelled in-flight pauses. On kind the node address is
+`docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' kind-control-plane`.
+
+**Host.** `fs.inotify.max_user_instances` (default 128, one budget per user shared by
+kubelet, containerd and every sandbox; 65536 held at 3072 sandboxes) and
+`fs.inotify.max_user_watches`; `net.ipv4.neigh.default.gc_thresh1`, `gc_thresh2` and
+`gc_thresh3` (the default ceiling of 1024 is global across network namespaces and
+overflows above about 1000 sandbox addresses;
+[#2497](https://github.com/agent-substrate/substrate/pull/2497) warns when it is at the
+default); `fs.aio-max-nr`; `nofile` 1048576 for the container runtime. Above a few
+hundred sandboxes per node, reserve CPU for the kubelet
+([#2495](https://github.com/agent-substrate/substrate/pull/2495) on kind), or the node
+flaps NotReady and the taint manager evicts its workers.
+
+**arm64 and 64 KiB pages.** gVisor does not emulate, so an image must match the node
+architecture or the actor fails at `runsc start`; map image names with
+`sandbox_spec.image_rewrites` (see Run). On a 64 KiB-page kernel the released gVisor
+assets fail at `runsc start` too: build `runsc` from a gVisor master that has the
+64 KiB restore guards removed (b27af97d3b, 2026-10-09) with `--define=pagesize=64k`,
+upload the tarball to the install's object store, and point the `gvisor-default`
+SandboxConfig's arm64 asset at it before creating any template; a template created
+before the swap never gets a golden snapshot.
 
 ### Templates
 
@@ -96,11 +173,13 @@ then install this package into it with
 tests), and a plain install resolves that source and puts a second `nemo_gym` from Gym
 main into `site-packages`, which shadows the checkout's editable install for every
 console script such as `gym`. Install it after the last sync: a plain `uv sync` removes
-packages that are not in Gym's lock. A server that builds its own venv from a
-`requirements.txt` in its directory, as `mini_swe_agent_2` does, resolves the provider
-inside that venv: add `gym-substrate @ git+https://github.com/dims/gym-substrate` to that
-file, or, once the first `gym env start` has built that venv (about a minute), install it
-there the same way; Gym keeps the venv and only adds to it:
+packages that are not in Gym's lock. A server that builds its own venv from a `requirements.txt` in its directory, as
+`mini_swe_agent_2` does, resolves the provider inside that venv. With
+[NVIDIA-NeMo/Gym#4551](https://github.com/NVIDIA-NeMo/Gym/pull/4551) every distribution
+that publishes a `nemo_gym.sandbox_providers` entry point is installed there through
+`head_server_deps`. Without it, add `gym-substrate @ git+https://github.com/dims/gym-substrate`
+to that file, or install it there once the first `gym env start` has built the venv
+(about a minute); Gym keeps the venv and only adds to it:
 
 ```bash
 uv pip install --no-deps --python responses_api_agents/mini_swe_agent_2/.venv/bin/python \
@@ -112,9 +191,9 @@ makes Ray's `uv run` hook demand a `pyproject.toml` inside the agent's directory
 `mini_swe_agent_2` server exits at startup.
 
 `connection.ateapi_addr` and `connection.atenet_addr` take any host:port that reaches
-the API Service and the router Service: the port-forwards below, or NodePort Services
-on the kind node (`172.18.0.2:30443` and `172.18.0.2:30080` in the arm64 runs) when
-local ports 8080 and 8081 are taken, as on BCM hosts.
+the `api` Service and the `atenet-router` Service: the port-forwards below for a smoke,
+the NodePorts of `manifests/nodeports.yaml` for a run (see Cluster). When local ports
+8080 and 8000 are taken, forward elsewhere and set both addresses.
 
 ```bash
 kubectl port-forward -n ate-system svc/api 8080:443 &
@@ -183,7 +262,7 @@ sandbox:
       concurrency: 32             # per provider instance; Gym makes one per sandbox
       capacity_retry_delay_s: 5
     probe:
-      timeout_s: 660              # above the router's --parked-request-budget
+      timeout_s: 660              # above the router's --parked-request-budget (10 min, see Cluster)
 ```
 
 ### `suspend_policy`
