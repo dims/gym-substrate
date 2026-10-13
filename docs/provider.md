@@ -347,7 +347,8 @@ Measured on 32-vCPU hosts: about 20 min cold on an amd64 host that had only the 
 installed (kind 24 s, the Substrate install 4 min, templates 1 min, Gym checkout and venv
 1 min, the servers' first start and the warm-up rollout 6 min, the measured rollout 5 min),
 and 21 min on an arm64 host with the 64 KiB asset and warm caches, where the rollout itself
-takes 8 min. With warm caches the Substrate install takes about 90 s.
+takes 8 min. With warm caches the Substrate install takes about 90 s. On a 4-vCPU GitHub runner
+the whole pass takes 29 min (`from-zero.yml`), the Substrate install 7 min of it.
 
 The pass leaves the Gym servers and the replay policy running, so `scripts/run_arm.sh` can
 follow with a comparison.

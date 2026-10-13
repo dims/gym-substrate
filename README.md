@@ -47,7 +47,7 @@ Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label t
 
 ## CI
 
-`ci.yml` lints and tests on every change. `kind-smoke.yml` brings Substrate up on kind on an amd64 and an arm64 runner, builds a template and runs the live smoke (about 20 minutes, skipped for docs-only changes). `from-zero.yml` runs `hack/rerun-all.sh` end to end with a Gym rollout, daily and on demand.
+`ci.yml` lints and tests on every change. `kind-smoke.yml` brings Substrate up on kind on an amd64 and an arm64 runner, builds a template and runs the live smoke (10 minutes per runner, skipped for docs-only changes). `from-zero.yml` runs `hack/rerun-all.sh` end to end with a Gym rollout, daily and on demand (about 30 minutes on `ubuntu-latest`).
 
 ## Scripts and manifests
 
