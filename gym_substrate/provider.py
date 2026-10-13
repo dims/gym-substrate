@@ -847,6 +847,14 @@ class SubstrateProvider:
             reply = await self._control("GetActor", ateapi_pb2.GetActorRequest(actor=actor.object_ref))
             state = reply.status.state
             if state not in _TRANSITIONAL_STATES or loop.time() >= deadline:
+                if state not in _PARKED_STATES:
+                    LOGGER.warning(
+                        "substrate: %s on %s left it %s after %.0f s; the next park retries",
+                        rpc,
+                        actor.name,
+                        ateapi_pb2.ActorState.Name(state),
+                        settle_s,
+                    )
                 return state
             await asyncio.sleep(0.25)
 
