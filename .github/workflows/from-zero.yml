@@ -10,7 +10,7 @@ on:
         description: runner label
         default: ubuntu-latest
       gate_instance:
-        description: SWE-bench instance for the gate rollout (its image must be public for the runner's architecture)
+        description: SWE-bench instance for the gate rollout; its image must be public for the runner's architecture and its recorded rollout must resolve (of Gym's examples only scikit-learn-14141 does, and only for x86_64)
         default: scikit-learn__scikit-learn-14141
 jobs:
   from-zero:
@@ -28,6 +28,7 @@ jobs:
           go install sigs.k8s.io/kind@v0.33.0
           go install github.com/google/ko@v0.19.1
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          echo "$HOME/gym-substrate-run/bin" >> "$GITHUB_PATH"   # kubectl-ate, built by hack/kind-up.sh
           sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true

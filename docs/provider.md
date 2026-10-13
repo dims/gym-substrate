@@ -333,7 +333,8 @@ hack/rerun-all.sh --wipe
 Environment: `SUBSTRATE_REF` (default `upstream/main`); `GYM_REF` and `GYM_BRANCHES` (the
 dims/Nemo-Gym branches merged on top; default the four pull requests under Requirements);
 `GYM_SUBSTRATE_SOURCE` (a git URL or a directory; default this repository's main);
-`GATE_INSTANCE` (default `scikit-learn__scikit-learn-14141`) and `EXTRA_IMAGES`;
+`GATE_INSTANCE` (default `scikit-learn__scikit-learn-14141`, the one recorded rollout in Gym's
+examples that resolves; the gate requires reward 1.0) and `EXTRA_IMAGES`;
 `POOL_REPLICAS`, `POOL_CPU`, `POOL_MEMORY` (default 3 workers of cpu 6 / 12Gi, nine slots for
 cpu 1 / 4Gi actors); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel (a
 `gvisor.tar.zstd` built with `--define=pagesize=64k` and its `.sha256`, uploaded by

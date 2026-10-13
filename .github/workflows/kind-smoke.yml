@@ -31,6 +31,7 @@ jobs:
           go install sigs.k8s.io/kind@v0.33.0
           go install github.com/google/ko@v0.19.1
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          echo "$HOME/gym-substrate-run/bin" >> "$GITHUB_PATH"   # kubectl-ate, built by hack/kind-up.sh
           sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
           # x86-64 runners expose /dev/kvm once this rule exists; kind mounts it when present.
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
