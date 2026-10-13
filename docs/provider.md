@@ -311,6 +311,45 @@ workers by state (`kubectl -n otel-system port-forward svc/grafana 3000:3000`, t
 `scripts/oversub_provider.py` runs the same idea without Gym: N sandboxes stepping with
 gaps, straight against the provider.
 
+### From zero on a prepared host
+
+`hack/rerun-all.sh` takes a host that passes `hack/host-check.sh` (docker with buildx, kind,
+kubectl, go, ko, uv, zstd, psmisc, the inotify sysctls, container egress) to a passing gate
+in one pass: Substrate from upstream main on a one-node kind cluster with the router
+settings, the NodePorts, the demo sandbox and a gym pool (`hack/kind-up.sh`); the task
+images in the kind registry (`hack/images.sh`); the templates with their golden snapshots
+(`hack/gym-templates.sh`); a Gym checkout with the pull requests and the plugin
+(`hack/gym-checkout.sh`); the smoke and one rollout (`hack/gate.sh`). Each step stops at
+the first missing evidence line. Everything the scripts create is under `WORK` (default
+`~/gym-substrate-run`); `--wipe` removes that, the kind cluster and its registry, and
+nothing else.
+
+```bash
+hack/host-check.sh
+hack/rerun-all.sh --wipe
+```
+
+Environment: `SUBSTRATE_REF` (default `upstream/main`); `GYM_REF` and `GYM_BRANCHES` (the
+dims/Nemo-Gym branches merged on top; default the four pull requests under Requirements);
+`GYM_SUBSTRATE_SOURCE` (a git URL or a directory; default this repository's main);
+`GATE_INSTANCE` (default `scikit-learn__scikit-learn-14141`) and `EXTRA_IMAGES`;
+`POOL_REPLICAS`, `POOL_CPU`, `POOL_MEMORY` (default 3 workers of cpu 6 / 12Gi, nine slots for
+cpu 1 / 4Gi actors); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel (a
+`gvisor.tar.zstd` built with `--define=pagesize=64k` and its `.sha256`, uploaded by
+`hack/gvisor-asset.sh`); `IMAGE_TARBALLS`, a directory of zstd-compressed `docker save`
+tarballs for an image that is not public, such as the arm64 sklearn image;
+`POST_KIND_HOOK`, a script run once the cluster exists, for a host whose firewall drops
+forwarded traffic until the kind bridge is allowed.
+
+Measured on 32-vCPU hosts: about 20 min cold on an amd64 host that had only the tools
+installed (kind 24 s, the Substrate install 4 min, templates 1 min, Gym checkout and venv
+1 min, the servers' first start and the warm-up rollout 6 min, the measured rollout 5 min),
+and 21 min on an arm64 host with the 64 KiB asset and warm caches, where the rollout itself
+takes 8 min. With warm caches the Substrate install takes about 90 s.
+
+The pass leaves the Gym servers and the replay policy running, so `scripts/run_arm.sh` can
+follow with a comparison.
+
 ## Authentication and trust
 
 `ateapi` rejects unauthenticated calls. The provider mints a token for the ServiceAccount

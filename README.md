@@ -52,6 +52,7 @@ Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label t
 - `scripts/run_arm.sh`: one arm of a pause-against-never comparison: the Gym servers restarted with a provider config, N rollouts at once, occupancy samples, a summary.
 - `scripts/oversub_provider.py`: more sandboxes than workers, each stepping with gaps, straight against the provider.
 - `scripts/delete_actors.py`: delete actors by name or by state.
+- `hack/rerun-all.sh`: a prepared host to a passing gate in one pass, each step gated on its evidence line; `hack/host-check.sh`, `kind-up.sh`, `gvisor-asset.sh`, `images.sh`, `gym-checkout.sh` and `gate.sh` are its steps (docs/provider.md, From zero).
 - `manifests/gym-workerpool.yaml`, `manifests/nodeports.yaml`, `manifests/grafana-sandbox-lifecycle.yaml`: a pool of eight-slot workers for cpu 1 / 4Gi actors, the API and the router on NodePorts, Grafana with the "Sandbox lifecycle" dashboard.
 
 ## Security
