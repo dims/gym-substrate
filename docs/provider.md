@@ -26,6 +26,28 @@ The in-actor server is this repository's `cmd/sandbox-agent`. It is static, so a
 `ActorTemplate` mounts its image as a read-only image volume into the benchmark
 image, which runs untouched, and sets it as the container command.
 
+## Requirements
+
+**NeMo Gym.** Upstream `main` plus these pull requests until they merge:
+
+- [NVIDIA-NeMo/Gym#4483](https://github.com/NVIDIA-NeMo/Gym/pull/4483): `openai_utils` drops litellm's `provider_specific_fields` from replayed chat history. Without it every `mini_swe_agent_2` rollout fails with a 422 on its second turn.
+- [#4472](https://github.com/NVIDIA-NeMo/Gym/pull/4472): `mini_swe_agent_2` ends a rollout when its sandbox is gone or an exec does not run (return code 125 with an `error_type`). Without it the rollout steps on against a dead sandbox and scores 0 with no error.
+- [#4471](https://github.com/NVIDIA-NeMo/Gym/pull/4471): the per-instance sandbox config is replaced atomically. Concurrent rollouts tore it.
+- [#4551](https://github.com/NVIDIA-NeMo/Gym/pull/4551): a distribution that publishes a `nemo_gym.sandbox_providers` entry point is installed into every server venv through `head_server_deps`. Without it, install the plugin into the agent server's venv by hand (see Run).
+
+**Substrate.** Any install of `main` at or past f03327bd runs the provider. Runs with more sandboxes than slots used these pull requests as well:
+
+- [agent-substrate/substrate#2558](https://github.com/agent-substrate/substrate/pull/2558): a lifecycle workflow runs to its end when the caller goes away. Without it a `PauseActor` that outruns the client deadline leaves the actor `PAUSING` for good.
+- [#2491](https://github.com/agent-substrate/substrate/pull/2491): a retried pause reuses the checkpoint image a cancelled attempt left instead of crashing the actor.
+- [#2559](https://github.com/agent-substrate/substrate/pull/2559): terminate deletes the sandbox root first. Under load `runsc delete` of the application container died at its budget and left actors `DELETING` with their slots held.
+- [#2492](https://github.com/agent-substrate/substrate/pull/2492): a slow first answer passes the wakeup probe. A restore wave onto a starved node crashed healthy actors otherwise.
+- [#2493](https://github.com/agent-substrate/substrate/pull/2493), [#2496](https://github.com/agent-substrate/substrate/pull/2496), [#2557](https://github.com/agent-substrate/substrate/pull/2557): ateapi's PostgreSQL pool defaults to 20 connections, the postgres probes get 5 s and 10 s timeouts, and the control-plane pods get CPU requests and 5 s probes. Without them a few hundred sandboxes per node starve the control plane.
+- [#2560](https://github.com/agent-substrate/substrate/pull/2560): the router's route timeout, parked budget and ext_proc breaker become install settings. Without it, patch the router Deployment after every install (see Cluster).
+
+Last tested: the plugin at c02a7db against Substrate `main` f03327bd with those changes and Gym `main` 43a5e5c0b with those pull requests.
+
+**Tools.** `kubectl`, `kubectl-ate` (built from the Substrate checkout), `ko`, `go`, `uv`, and `docker` to push images into the cluster's registry.
+
 ## Setup
 
 ### Cluster
