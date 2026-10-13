@@ -583,6 +583,27 @@ async def test_control_does_not_retry_not_found() -> None:
         await provider._control("GetActor", ateapi_pb2.GetActorRequest())
 
 
+async def test_pause_outliving_its_deadline_waits_for_the_parked_state() -> None:
+    recorder = _Recorder()
+    provider = _make_provider(recorder)
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+    inner = recorder.control
+
+    async def control(rpc: str, request: Any) -> Any:
+        if rpc == "PauseActor":
+            # The server finishes the pause after the client's deadline passed.
+            recorder.control_calls.append((rpc, request))
+            recorder._parked = True
+            raise _grpc_error(grpc.StatusCode.DEADLINE_EXCEEDED, "Deadline Exceeded")
+        return await inner(rpc, request)
+
+    provider._control = control  # type: ignore[method-assign]
+    await provider.pause(handle)
+
+    assert recorder.rpcs().count("PauseActor") == 1
+    assert "GetActor" in recorder.rpcs()
+
+
 async def test_close_deletes_in_any_state() -> None:
     recorder = _Recorder()
     provider = _make_provider(recorder)

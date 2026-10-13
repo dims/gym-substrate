@@ -827,15 +827,22 @@ class SubstrateProvider:
             request: Any = ateapi_pb2.PauseActorRequest(actor=actor.object_ref)
         else:
             request = ateapi_pb2.SuspendActorRequest(actor=actor.object_ref)
+        settle_s = _PARK_SETTLE_BUDGET_S
         try:
             await self._control(rpc, request)
         except grpc.aio.AioRpcError as e:
-            # Already parked, by a previous call or by the platform.
-            if e.code() != grpc.StatusCode.FAILED_PRECONDITION:
+            if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                # The checkpoint queued behind others on a loaded node and
+                # outran the client deadline; ateapi keeps working on it, so
+                # wait for the state instead of failing the park.
+                LOGGER.warning("substrate: %s on %s outran its deadline; waiting for the state", rpc, actor.name)
+                settle_s = self._connection.grpc_timeout_s
+            elif e.code() != grpc.StatusCode.FAILED_PRECONDITION:
+                # FAILED_PRECONDITION: already parked, by a previous call or by the platform.
                 raise
 
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + _PARK_SETTLE_BUDGET_S
+        deadline = loop.time() + settle_s
         while True:
             reply = await self._control("GetActor", ateapi_pb2.GetActorRequest(actor=actor.object_ref))
             state = reply.status.state
