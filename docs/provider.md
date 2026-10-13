@@ -224,6 +224,31 @@ The image argument is the exact string the template was generated from
 (`localhost:5001/python:3.12-slim` for an image pushed to the kind registry), since
 the template name is derived from it.
 
+### A pause-against-never comparison
+
+`scripts/replay_policy.py` answers chat completions from recorded Gym rollouts after a
+think time (`--think-s` constant, or `--think-mean-s` exponential, seeded per rollout and
+turn; the counters restart on `POST /reset`), so a run needs no model. Point the model
+server at it with an `env.yaml` in the Gym checkout, then run one arm per provider config
+with `scripts/run_arm.sh`; the control arm is a copy of the config with
+`suspend_policy: never`:
+
+```bash
+printf 'policy_base_url: http://127.0.0.1:9797/v1\npolicy_api_key: replay\npolicy_model_name: replay\n' > env.yaml
+python /path/to/gym-substrate/scripts/replay_policy.py \
+  --rollouts responses_api_agents/mini_swe_agent_2/data/example_rollouts.jsonl --port 9797 --think-mean-s 15 &
+/path/to/gym-substrate/scripts/run_arm.sh ab12-pause /path/to/substrate.yaml 12
+/path/to/gym-substrate/scripts/run_arm.sh ab12-never /path/to/substrate-never.yaml 12
+```
+
+Each arm prints the eval's exit code, the actors left behind, the rewards and the mean
+number of actors holding a worker. `manifests/grafana-sandbox-lifecycle.yaml` shows the
+lifecycle live: transitions, resumes by snapshot kind, parked requests, restore phases,
+workers by state (`kubectl -n otel-system port-forward svc/grafana 3000:3000`, then
+`/d/sandbox-lifecycle`; anonymous admin, so keep it on a port-forward).
+`scripts/oversub_provider.py` runs the same idea without Gym: N sandboxes stepping with
+gaps, straight against the provider.
+
 ## Authentication and trust
 
 `ateapi` rejects unauthenticated calls. The provider mints a ServiceAccount

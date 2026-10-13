@@ -7,6 +7,10 @@ The pieces that connect [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) sandboxes
 
 - `gym_substrate/`: the Gym `SandboxProvider` named `substrate`, installed as a plugin through the `nemo_gym.sandbox_providers` entry point: create, exec, upload, download, status, pause, resume and close against Substrate actors, with the generated ateapi gRPC stubs under `_ateapi/`. Details in [docs/provider.md](docs/provider.md). The same code sits on the `substrate-provider-upstream` branch of [dims/Nemo-Gym](https://github.com/dims/Nemo-Gym/tree/substrate-provider-upstream) as the candidate for an in-tree Gym PR; this repository is where it is developed.
 
+- `scripts/` and `manifests/`: a replay policy and a runner for a pause-against-never comparison without a model, an oversubscription probe, a scoped actor delete, a WorkerPool sized for the templates, NodePort Services and a Grafana dashboard (see below).
+
+[docs/provider.md](docs/provider.md) says what the cluster needs and what to expect under load; [docs/architecture.md](docs/architecture.md) has the contracts between the two sides, the sequences and the failure handling.
+
 ## Install the provider
 
 ```bash
@@ -37,6 +41,15 @@ BUCKET_NAME=<snapshot bucket> KO_DOCKER_REPO=<registry> hack/gym-templates.sh py
 ```
 
 Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label the templates select, default `sandbox`), `ACTOR_CPU` and `ACTOR_MEMORY` (per-actor limits, default cpu 1), `AGENT_IMAGE` (a digest-pinned agent image instead of a `ko` build).
+
+## Scripts and manifests
+
+- `scripts/smoke_provider.py`: one sandbox through the provider against a live cluster.
+- `scripts/replay_policy.py`: an OpenAI-compatible server that replays recorded Gym rollouts after a think time, so a run needs no model.
+- `scripts/run_arm.sh`: one arm of a pause-against-never comparison: the Gym servers restarted with a provider config, N rollouts at once, occupancy samples, a summary.
+- `scripts/oversub_provider.py`: more sandboxes than workers, each stepping with gaps, straight against the provider.
+- `scripts/delete_actors.py`: delete actors by name or by state.
+- `manifests/gym-workerpool.yaml`, `manifests/nodeports.yaml`, `manifests/grafana-sandbox-lifecycle.yaml`: a pool of eight-slot workers for cpu 1 / 4Gi actors, the API and the router on NodePorts, Grafana with the "Sandbox lifecycle" dashboard.
 
 ## Security
 
