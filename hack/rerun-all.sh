@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # From a prepared host to a passing gate in one pass, each step gated on its evidence line.
-#   hack/rerun-all.sh [--wipe]
+#   hack/rerun-all.sh [--wipe | --wipe-only]
 # --wipe first stops the Gym servers, Ray, the replay policy and port-forwards, deletes the kind
 # cluster and its registry, and removes WORK/gym and WORK/run. Nothing else is removed.
+# --wipe-only does that and stops.
 # Environment: what the step scripts take, plus GATE_INSTANCE (default
 # scikit-learn__scikit-learn-14141) and EXTRA_IMAGES (more images to push and template).
 set -uo pipefail
@@ -20,7 +21,7 @@ run() { # run NAME EVIDENCE COMMAND...
   step "$name"; "$@" 2>&1 | tee "$log"; need "$log" "$evidence"
 }
 
-if [ "${1:-}" = "--wipe" ]; then
+if [ "${1:-}" = "--wipe" ] || [ "${1:-}" = "--wipe-only" ]; then
   step "wipe"
   pkill -f "[g]ym env start"; pkill -f "[g]ym eval run"; pkill -f "[r]eplay_policy.py"; pkill -f "[k]ubectl.*port-forward"; sleep 3
   [ -x "$WORK/gym/.venv/bin/ray" ] && "$WORK/gym/.venv/bin/ray" stop --force >/dev/null 2>&1
@@ -33,6 +34,7 @@ if [ "${1:-}" = "--wipe" ]; then
   docker rm -f kind-registry >/dev/null 2>&1
   rm -rf "$WORK/gym" "$WORK/run"; mkdir -p "$RUN_DIR"
   echo "clusters: [$(kind get clusters 2>/dev/null | tr '\n' ' ')] kind containers: $(docker ps -a --format '{{.Names}}' | grep -c -E '^kind')"
+  [ "${1:-}" = "--wipe-only" ] && { step "WIPE_DONE"; exit 0; }
 fi
 
 step "host-check"

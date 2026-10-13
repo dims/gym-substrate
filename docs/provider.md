@@ -322,7 +322,8 @@ images in the kind registry (`hack/images.sh`); the templates with their golden 
 (`hack/gym-checkout.sh`); the smoke and one rollout (`hack/gate.sh`). Each step stops at
 the first missing evidence line. Everything the scripts create is under `WORK` (default
 `~/gym-substrate-run`); `--wipe` removes that, the kind cluster and its registry, and
-nothing else.
+nothing else; `--wipe-only` stops after the wipe. `docs/demo/README.md` walks through what
+the pass builds.
 
 ```bash
 hack/host-check.sh
