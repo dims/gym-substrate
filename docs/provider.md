@@ -306,6 +306,52 @@ the probe until a worker has room. `status()` reports a paused, pausing,
 suspended or suspending actor as `PAUSED`, a resuming or reverting one as
 `STARTING`, a crashed one as `ERROR`, and a deleted one as `STOPPED`.
 
+## Behavior under load
+
+A slot is room on a worker for one actor of the template's size; a `RUNNING` actor holds
+one and a `PAUSED` or `SUSPENDED` actor holds none. With N sandboxes on S slots, at most S
+run at once; the rest are parked, `PAUSED` on their node under `pause_after_exec` or
+waiting for their first slot under `never`. An exec against a parked actor is a resume
+that needs a free slot, and the router parks the request for its budget. What to expect,
+from runs at one to four times the slots:
+
+- **Restore throughput bounds the pause path**, not CPU or memory. A pause step holds a
+  slot for the checkpoint, the restore and the command; under load each of the first two
+  takes tens of seconds, against well under a second on an idle node. Measure the hold
+  time H of one step on your cluster (the dashboard's checkpoint and restore panels);
+  with a think time T between steps, N actors on S slots drain only when
+  T >= H x (N/S - 1). On a 352-thread host H was about 70 s and the host restored about
+  four actors per second. Below the rule, parked waits run past the budget, the provider
+  retries until the request budget (`default_timeout_s` plus 30 s), and the step fails
+  with return code 125 and an `error_type`; with Gym#4472 the rollout then ends with an
+  error instead of scoring 0 silently.
+- **Pause pays when the think time is long against one checkpoint and restore.** The
+  saving is the think time between commands; the cost is one cycle per idle period. At a
+  think time of a few seconds the pause arm is slower per task than `never`, and at
+  N = S `never` wins outright. Pause exists for N > S.
+- **Create waits too.** A new actor's first readiness probe is a resume that may park for
+  the whole budget per attempt. Time queued for a slot is charged to
+  `create.ready_queue_timeout_s`, not `ready_timeout_s`; an empty 504 from the router (its
+  fail-fast when a resume flight outruns its deadline) counts as queued. A failed create
+  is deleted in the background for up to 15 min, because the parked probe's resume flight
+  still holds the actor's lease.
+- **Synchronized bursts hit the ext_proc breaker.** Sandboxes stepping in lockstep get an
+  Envoy 503 `overflow` above `--extproc-max-requests`, which carries no actor reason, so
+  the provider fails the step. Desynchronize the steps or raise the breaker.
+- **Control calls fail transiently under bursts.** ateapi answers `ABORTED` (lease held,
+  version conflict), `UNAVAILABLE` (restart) and `INTERNAL` (PostgreSQL out of
+  connections); the provider retries five times with backoff, about eight seconds in all.
+- **A paused actor is pinned to its node.** Its snapshot lives under that node's
+  `/var/lib/ate`; a drain or a pool rollout loses it. Suspend every actor first.
+- **A dead sandbox is a `RUNNING` actor.** Substrate does not notice the application
+  exit; the next exec fails and the provider reports return code 125, and Gym#4472 ends
+  the rollout.
+- **The agent server caps rollouts in flight.** `mini_swe_agent_2`'s `concurrency` is 64;
+  raise it in an override config for larger runs.
+- **Nothing times actors out.** A dead agent process leaves its actors behind, paused and
+  nearly free, until something deletes them: `scripts/delete_actors.py` by state or by
+  name.
+
 ## What this provider does not honor
 
 Declined rather than faked:
