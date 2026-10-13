@@ -68,16 +68,20 @@ with it.
 ### Run
 
 In a Gym checkout, build the environment with `uv sync --extra dev --extra sandbox`,
-then install this package into it with `uv pip install git+https://github.com/dims/gym-substrate`.
-Install it after the last sync: a plain `uv sync` removes packages that are not in
-Gym's lock. A server that builds its own venv from a `requirements.txt` in its
-directory, as `mini_swe_agent_2` does, resolves the provider inside that venv: add
-`gym-substrate @ git+https://github.com/dims/gym-substrate` to that file, or, once the first
-`gym env start` has built that venv (about a minute), install it there; Gym keeps the venv
-and only adds to it:
+then install this package into it with
+`uv pip install --no-deps git+https://github.com/dims/gym-substrate`.
+`--no-deps` matters: this package declares `nemo-gym` with a git source (for its own
+tests), and a plain install resolves that source and puts a second `nemo_gym` from Gym
+main into `site-packages`, which shadows the checkout's editable install for every
+console script such as `gym`. Install it after the last sync: a plain `uv sync` removes
+packages that are not in Gym's lock. A server that builds its own venv from a
+`requirements.txt` in its directory, as `mini_swe_agent_2` does, resolves the provider
+inside that venv: add `gym-substrate @ git+https://github.com/dims/gym-substrate` to that
+file, or, once the first `gym env start` has built that venv (about a minute), install it
+there the same way; Gym keeps the venv and only adds to it:
 
 ```bash
-uv pip install --python responses_api_agents/mini_swe_agent_2/.venv/bin/python \
+uv pip install --no-deps --python responses_api_agents/mini_swe_agent_2/.venv/bin/python \
   git+https://github.com/dims/gym-substrate
 ```
 

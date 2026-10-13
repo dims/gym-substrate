@@ -10,8 +10,11 @@ The pieces that connect [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) sandboxes
 ## Install the provider
 
 ```bash
-uv pip install git+https://github.com/dims/gym-substrate
+uv pip install --no-deps git+https://github.com/dims/gym-substrate
 ```
+
+`--no-deps` keeps the Gym checkout's own `nemo-gym`; without it the install pulls a
+second `nemo_gym` from Gym main that shadows the editable one (see `docs/provider.md`).
 
 Gym then resolves `provider: {substrate: {...}}` in a sandbox config through the entry point; `gym_substrate/configs/substrate.yaml` is a starting config.
 
