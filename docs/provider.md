@@ -223,7 +223,7 @@ package to the project and build the environment:
 
 ```bash
 uv add "gym-substrate @ git+https://github.com/dims/gym-substrate"
-uv sync --extra dev --extra sandbox
+uv sync --extra dev --extra sandbox --extra ray
 ```
 
 `uv add` records the package in the checkout's `pyproject.toml` and `uv.lock` (two local

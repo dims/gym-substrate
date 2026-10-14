@@ -47,7 +47,7 @@ if [ -d "$GYM_SUBSTRATE_SOURCE" ]; then
 else
   uv add -q "gym-substrate @ $GYM_SUBSTRATE_SOURCE" > "$LOG_DIR/uv-add.log" 2>&1 || { tail -10 "$LOG_DIR/uv-add.log"; fail UV_ADD; }
 fi
-uv sync -q --extra dev --extra sandbox > "$LOG_DIR/uv-sync.log" 2>&1 || { tail -10 "$LOG_DIR/uv-sync.log"; fail UV_SYNC; }
+uv sync -q --extra dev --extra sandbox --extra ray > "$LOG_DIR/uv-sync.log" 2>&1 || { tail -10 "$LOG_DIR/uv-sync.log"; fail UV_SYNC; }
 (cd /tmp && "$GYM_DIR/.venv/bin/python" -c "import importlib.metadata as m, nemo_gym; from nemo_gym.sandbox.providers.registry import get_provider_class; print('provider resolves:', get_provider_class('substrate').__module__, 'gym-substrate', m.version('gym-substrate'), 'nemo_gym from', nemo_gym.__file__)") || fail PLUGIN_RESOLVE
 
 step "env.yaml and provider configs"
