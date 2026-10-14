@@ -8,7 +8,8 @@
 # An argument with ':' or '/' is an image; anything else is a SWE-bench instance id and maps to
 # docker.io/swebench/sweb.eval.<arch>.<id with __ -> _1776_>:latest, with the x86_64 names
 # turned into arm64 ones on an arm64 host. An image that is not public is taken from
-# IMAGE_TARBALLS/*.tar.zst when a loaded tag matches.
+# IMAGE_TARBALLS/*.tar.zst when a loaded tag matches. Without IMAGE_TARBALLS,
+# missing arm64 task images are built into archives from the pinned task recipe.
 set -uo pipefail
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/_lib.sh"
@@ -23,9 +24,16 @@ done
 have() { docker image inspect "$1" >/dev/null 2>&1; }
 loaded=0
 load_tarballs() {
-  [ "$loaded" = 0 ] || return 0; loaded=1
-  [ -n "${IMAGE_TARBALLS:-}" ] || return 0
-  for t in "$IMAGE_TARBALLS"/*.tar.zst; do
+  local tarballs=() archive t
+  if [ -z "${IMAGE_TARBALLS:-}" ] && [ "$SW" = arm64 ]; then
+    archive=$(bash "$REPO/hack/build-arm64-image.sh" "$1") || fail IMAGE_BUILD "$1"
+    tarballs=("$archive")
+  else
+    [ "$loaded" = 0 ] || return 0; loaded=1
+    [ -n "${IMAGE_TARBALLS:-}" ] || return 0
+    tarballs=("$IMAGE_TARBALLS"/*.tar.zst)
+  fi
+  for t in "${tarballs[@]}"; do
     [ -e "$t" ] || continue
     echo "loading $(basename "$t")"
     zstd -d -c "$t" | docker load >> "$LOG_DIR/docker-load.log" 2>&1 || fail IMAGE_LOAD "$t"
@@ -42,7 +50,7 @@ for img in "${images[@]}"; do
   for c in "${candidates[@]}"; do have "$c" && { found=$c; break; }; done
   if [ -z "$found" ] && docker pull -q "$src" >/dev/null 2>&1; then found=$src; fi
   if [ -z "$found" ]; then
-    load_tarballs
+    load_tarballs "$src"
     for c in "${candidates[@]}"; do have "$c" && { found=$c; break; }; done
   fi
   [ -n "$found" ] || fail IMAGE_MISSING "$src is not public and no tarball under ${IMAGE_TARBALLS:-IMAGE_TARBALLS} provides it"

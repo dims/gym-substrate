@@ -352,7 +352,12 @@ examples that resolves; the gate requires reward 1.0) and `EXTRA_IMAGES`;
 cpu 1 / 4Gi actors); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel (a
 `gvisor.tar.zstd` built with `--define=pagesize=64k` and its `.sha256`, uploaded by
 `hack/gvisor-asset.sh`); `IMAGE_TARBALLS`, a directory of zstd-compressed `docker save`
-tarballs for an image that is not public, such as the arm64 sklearn image;
+tarballs for an image that is not public, such as the arm64 sklearn image. When
+unset, a missing arm64 task image is built from the pinned commit of
+[SWE-bench task PR #24](https://github.com/SWE-bench/swe-bench-tasks/pull/24), saved under
+`WORK/images-arm64/<commit>/`, and loaded through the same tarball path. Existing
+archives are reused; an explicitly supplied directory disables the build fallback.
+Only tasks with a `Dockerfile.arm64` in that commit can be built this way;
 `POST_KIND_HOOK`, a script run once the cluster exists, for a host whose firewall drops
 forwarded traffic until the kind bridge is allowed.
 

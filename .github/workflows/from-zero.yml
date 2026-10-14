@@ -10,7 +10,7 @@ on:
         description: runner label
         default: ubuntu-latest
       gate_instance:
-        description: SWE-bench instance for the gate rollout; its image must be public for the runner's architecture and its recorded rollout must resolve (of Gym's examples only scikit-learn-14141 does, and only for x86_64)
+        description: SWE-bench instance with a passing recorded rollout (scikit-learn-14141 by default; its arm64 image is built when missing)
         default: scikit-learn__scikit-learn-14141
 jobs:
   from-zero:
