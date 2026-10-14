@@ -25,6 +25,7 @@ case "$1" in
   image) test -f "$WORK/loaded" ;;
   pull) exit 1 ;;
   buildx) echo archive; exit "${BUILD_EXIT:-0}" ;;
+  save) echo archive ;;
   load) cat >/dev/null; touch "$WORK/loaded" ;;
   tag|push) exit 0 ;;
   *) exit 1 ;;
@@ -59,6 +60,8 @@ def test_arm64_builds_an_archive_and_uses_the_loader(image_env):
     result, commands = run_images(image_env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "docker buildx build --platform linux/arm64" in commands
+    assert "--load" in commands
+    assert commands.index("docker save") < commands.index("docker load")
     assert "docker load" in commands and "docker push" in commands
     assert list(pathlib.Path(image_env["WORK"]).rglob("*.tar.zst"))
     (pathlib.Path(image_env["WORK"]) / "loaded").unlink()
@@ -92,5 +95,6 @@ def test_failed_build_does_not_publish_an_archive(image_env):
     result, commands = run_images(image_env)
     assert result.returncode != 0
     assert "docker buildx" in commands
+    assert "docker save" not in commands
     assert "docker load" not in commands and "docker push" not in commands
     assert not list(pathlib.Path(image_env["WORK"]).rglob("*.tar.zst"))

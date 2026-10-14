@@ -29,8 +29,8 @@ if [ ! -s "$ARCHIVE" ]; then
   TMP_ARCHIVE=$(mktemp "$ARCHIVE.XXXXXX")
   trap 'rm -f "$TMP_ARCHIVE"' EXIT
   echo "building $IMAGE from swe-bench-tasks $TASKS_COMMIT" >&2
-  docker buildx build --platform linux/arm64 -f "$TASK/Dockerfile.arm64" -t "$IMAGE" \
-    --output type=docker,dest=- "$TASK" | zstd -T0 -q -f -o "$TMP_ARCHIVE"
+  docker buildx build --platform linux/arm64 --load -f "$TASK/Dockerfile.arm64" -t "$IMAGE" "$TASK" >&2
+  docker save "$IMAGE" | zstd -T0 -q -f -o "$TMP_ARCHIVE"
   mv "$TMP_ARCHIVE" "$ARCHIVE"
 fi
 printf '%s\n' "$ARCHIVE"
