@@ -73,6 +73,7 @@ echo "router args: $(kubectl -n ate-system get deploy atenet-router -o jsonpath=
 
 step "nodeports"
 kubectl apply -f "$REPO/manifests/nodeports.yaml" >/dev/null || fail NODEPORTS
+bash "$REPO/hack/kind-api-access.sh" >/dev/null || fail API_HOST_ACCESS
 NODE_IP=$(docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' kind-control-plane); printf '%s' "$NODE_IP" > "$RUN_DIR/node-ip"
 A=000; R=000
 for _ in $(seq 1 12); do

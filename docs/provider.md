@@ -137,6 +137,11 @@ Service (HTTP, 80). A port-forward serves a smoke. For a run, apply
 collapsed under load and cancelled in-flight pauses. On kind the node address is
 `docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' kind-control-plane`.
 
+On kind, also run `bash hack/kind-api-access.sh` (`hack/kind-up.sh` does this).
+Substrate denies API ingress from outside approved pods by default. This adds access
+to API port 443 from the Docker bridge gateway, where the host-side provider runs;
+other pods remain subject to Substrate's policies. TLS and token authentication still apply.
+
 **Host.** `fs.inotify.max_user_instances` (default 128, one budget per user shared by
 kubelet, containerd and every sandbox; 65536 held at 3072 sandboxes) and
 `fs.inotify.max_user_watches`; `net.ipv4.neigh.default.gc_thresh1`, `gc_thresh2` and
