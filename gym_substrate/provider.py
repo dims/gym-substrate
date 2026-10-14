@@ -65,7 +65,6 @@ _CAPACITY_MARKERS = ("router at capacity", "no worker has room")
 # only, so an actor stranded mid-transition fails the step instead of hanging
 # it; anything else, a CRASHED actor included, fails at once.
 _TRANSIENT_MARKERS = (
-    "got: ACTOR_STATE_PAUSING",
     "got: ACTOR_STATE_SUSPENDING",
     "got: ACTOR_STATE_RESUMING",
     "got: ACTOR_STATE_REVERTING",
@@ -97,19 +96,15 @@ _STATUS_MAP = {
     # resumes it on the next exec. PAUSED says so without implying it is gone.
     ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED: SandboxStatus.PAUSED,
     ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDING: SandboxStatus.PAUSED,
-    ateapi_pb2.ActorState.ACTOR_STATE_PAUSED: SandboxStatus.PAUSED,
-    ateapi_pb2.ActorState.ACTOR_STATE_PAUSING: SandboxStatus.PAUSED,
     ateapi_pb2.ActorState.ACTOR_STATE_CRASHED: SandboxStatus.ERROR,
     ateapi_pb2.ActorState.ACTOR_STATE_DELETING: SandboxStatus.STOPPED,
 }
 
 _PARKED_STATES = {
-    ateapi_pb2.ActorState.ACTOR_STATE_PAUSED,
     ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED,
 }
 
 _TRANSITIONAL_STATES = {
-    ateapi_pb2.ActorState.ACTOR_STATE_PAUSING,
     ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDING,
 }
 
@@ -331,7 +326,7 @@ class _SubstrateActor:
     inflight: int = 0
     suspend_task: asyncio.Task | None = None
     # Held while a pause or suspend is in progress. Requests wait on it, since
-    # the router refuses to resume an actor that is still PAUSING.
+    # the router refuses to resume an actor that is still SUSPENDING.
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Number of suspend tasks past their idle wait; those are left to finish.
     parking: int = 0

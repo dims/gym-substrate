@@ -43,7 +43,29 @@ POLICY = sys.argv[2] if len(sys.argv) > 2 else "pause_after_exec"
 ATESPACE = os.environ.get("ATESPACE", "nemo-gym")
 # idle_before_suspend_s in configs/substrate.yaml is 1 s; wait past it before reading the state.
 PARK_WAIT_S = 1.5
-PARKED_STATE = {"pause_after_exec": "ACTOR_STATE_PAUSED", "after_exec": "ACTOR_STATE_SUSPENDED"}.get(POLICY)
+
+
+def is_parked(actor, policy: str) -> bool:
+    if actor.status.state != ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED:
+        return False
+    latest = max(actor.status.snapshots, key=lambda snapshot: snapshot.generation, default=None)
+    if latest is None:
+        return False
+    if policy == "pause_after_exec":
+        return bool(latest.locality) and not latest.HasField("durable_snapshot")
+    return (
+        latest.HasField("durable_snapshot")
+        and latest.durable_snapshot.status == ateapi_pb2.SNAPSHOT_STORAGE_STATUS_COMPLETED
+    )
+
+
+async def check_parked(provider, handle, label: str) -> bool:
+    await asyncio.sleep(PARK_WAIT_S)
+    actor = await provider._control("GetActor", ateapi_pb2.GetActorRequest(actor=handle.raw.object_ref))
+    state = ateapi_pb2.ActorState.Name(actor.status.state)
+    parked = is_parked(actor, POLICY)
+    print(f"parked    {PARK_WAIT_S:6.1f}s  state={state} snapshot_matches_policy={parked} ({label})")
+    return parked
 
 
 async def actor_state(provider, handle) -> str:
@@ -68,12 +90,9 @@ async def main() -> int:
     print(
         f"create    {time.monotonic() - t0:6.1f}s  id={handle.sandbox_id}  state={await actor_state(provider, handle)}"
     )
-    if PARKED_STATE:
+    if POLICY != "never":
         # The provider parks a new sandbox too, so the first exec is a resume.
-        await asyncio.sleep(PARK_WAIT_S)
-        state = await actor_state(provider, handle)
-        print(f"parked    {PARK_WAIT_S:6.1f}s  state={state}  (first exec is a resume)")
-        failures += state != PARKED_STATE
+        failures += not await check_parked(provider, handle, "first exec is a resume")
 
     commands = [
         "echo hello; python3 --version; cat /work/seed.txt; echo $FOO",
@@ -89,11 +108,8 @@ async def main() -> int:
             f"state={state} stdout={(result.stdout or '').strip()!r} stderr={(result.stderr or '').strip()!r}"
         )
         failures += result.return_code != 0
-        if i == 0 and PARKED_STATE:
-            await asyncio.sleep(PARK_WAIT_S)
-            state = await actor_state(provider, handle)
-            print(f"parked    {PARK_WAIT_S:6.1f}s  state={state}  (next exec is the resume)")
-            failures += state != PARKED_STATE
+        if i == 0 and POLICY != "never":
+            failures += not await check_parked(provider, handle, "next exec is the resume")
 
     result = await provider.exec(handle, "sleep 5", timeout_s=1)
     print(f"timeout            rc={result.return_code} err={result.error_type}")

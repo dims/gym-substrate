@@ -45,7 +45,7 @@ image, which runs untouched, and sets it as the container command.
 
 **Substrate.** Any install of `main` at or past f03327bd runs the provider. Runs with more sandboxes than slots used these pull requests as well:
 
-- [agent-substrate/substrate#2558](https://github.com/agent-substrate/substrate/pull/2558): a lifecycle workflow runs to its end when the caller goes away. Without it a `PauseActor` that outruns the client deadline leaves the actor `PAUSING` for good.
+- [agent-substrate/substrate#2558](https://github.com/agent-substrate/substrate/pull/2558): a lifecycle workflow runs to its end when the caller goes away. Without it a `PauseActor` that outruns the client deadline leaves the actor `SUSPENDING` for good.
 - [#2491](https://github.com/agent-substrate/substrate/pull/2491): a retried pause reuses the checkpoint image a cancelled attempt left instead of crashing the actor.
 - [#2559](https://github.com/agent-substrate/substrate/pull/2559): terminate deletes the sandbox root first. Under load `runsc delete` of the application container died at its budget and left actors `DELETING` with their slots held.
 - [#2492](https://github.com/agent-substrate/substrate/pull/2492): a slow first answer passes the wakeup probe. A restore wave onto a starved node crashed healthy actors otherwise.
@@ -464,6 +464,10 @@ worker pool or draining a node.
 
 ### Pause, resume and status
 
+Substrate reports both a paused and a durably suspended actor as `SUSPENDED`. A pause
+has a latest snapshot with `locality` and no `durable_snapshot`; a suspend has a durable
+snapshot. Both operations pass through `SUSPENDING`.
+
 The provider implements `SupportsSandboxPauseResume`. `pause()` waits for
 requests in flight to finish (a pause would checkpoint a running command and
 cut its reply), calls `PauseActor` (or `SuspendActor` when the worker is being
@@ -477,8 +481,8 @@ suspended or suspending actor as `PAUSED`, a resuming or reverting one as
 ## Behavior under load
 
 A slot is room on a worker for one actor of the template's size; a `RUNNING` actor holds
-one and a `PAUSED` or `SUSPENDED` actor holds none. With N sandboxes on S slots, at most S
-run at once; the rest are parked, `PAUSED` on their node under `pause_after_exec` or
+one and a `SUSPENDED` actor holds none. With N sandboxes on S slots, at most S
+run at once; the rest are parked, with a local snapshot under `pause_after_exec` or
 waiting for their first slot under `never`. An exec against a parked actor is a resume
 that needs a free slot, and the router parks the request for its budget. What to expect,
 from runs at one to four times the slots:

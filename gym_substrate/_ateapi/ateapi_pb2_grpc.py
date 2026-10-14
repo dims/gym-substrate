@@ -95,10 +95,10 @@ class ControlStub:
                 request_serializer=ateapi__pb2.DeleteActorEgressPolicyRequest.SerializeToString,
                 response_deserializer=ateapi__pb2.EgressPolicy.FromString,
                 _registered_method=True)
-        self.MintActorJWT = channel.unary_unary(
-                '/ateapi.Control/MintActorJWT',
-                request_serializer=ateapi__pb2.MintActorJWTRequest.SerializeToString,
-                response_deserializer=ateapi__pb2.MintActorJWTResponse.FromString,
+        self.MintActorJwt = channel.unary_unary(
+                '/ateapi.Control/MintActorJwt',
+                request_serializer=ateapi__pb2.MintActorJwtRequest.SerializeToString,
+                response_deserializer=ateapi__pb2.MintActorJwtResponse.FromString,
                 _registered_method=True)
         self.MintActorCertificate = channel.unary_unary(
                 '/ateapi.Control/MintActorCertificate',
@@ -158,7 +158,7 @@ class ControlStub:
         self.DrainWorker = channel.unary_unary(
                 '/ateapi.Control/DrainWorker',
                 request_serializer=ateapi__pb2.DrainWorkerRequest.SerializeToString,
-                response_deserializer=ateapi__pb2.Worker.FromString,
+                response_deserializer=ateapi__pb2.DrainWorkerResponse.FromString,
                 _registered_method=True)
         self.ListWorkerActorAssignments = channel.unary_unary(
                 '/ateapi.Control/ListWorkerActorAssignments',
@@ -282,7 +282,9 @@ class ControlServicer:
         raise NotImplementedError('Method not implemented!')
 
     def PauseActor(self, request, context):
-        """Pause a given actor and keep its snapshots on node VM.
+        """Pause a given actor: checkpoint it to its worker's node and leave it
+        SUSPENDED with that node-local snapshot, pinned to the node. A paused
+        actor is told from a suspended one by its snapshots, not its state.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -296,7 +298,7 @@ class ControlServicer:
         raise NotImplementedError('Method not implemented!')
 
     def RevertActor(self, request, context):
-        """Revert an actor to SUSPENDED state.
+        """Revert an actor to SUSPENDED state at its durable snapshot.
         Only crashed, running or paused actors can be reverted.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -339,7 +341,7 @@ class ControlServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def MintActorJWT(self, request, context):
+    def MintActorJwt(self, request, context):
         """Create a Substrate-issued JWT asserting the actor identity.
 
         * Called by the egress gateway when actor JWT injection is configured for outbound requests.
@@ -630,10 +632,10 @@ def add_ControlServicer_to_server(servicer, server):
                     request_deserializer=ateapi__pb2.DeleteActorEgressPolicyRequest.FromString,
                     response_serializer=ateapi__pb2.EgressPolicy.SerializeToString,
             ),
-            'MintActorJWT': grpc.unary_unary_rpc_method_handler(
-                    servicer.MintActorJWT,
-                    request_deserializer=ateapi__pb2.MintActorJWTRequest.FromString,
-                    response_serializer=ateapi__pb2.MintActorJWTResponse.SerializeToString,
+            'MintActorJwt': grpc.unary_unary_rpc_method_handler(
+                    servicer.MintActorJwt,
+                    request_deserializer=ateapi__pb2.MintActorJwtRequest.FromString,
+                    response_serializer=ateapi__pb2.MintActorJwtResponse.SerializeToString,
             ),
             'MintActorCertificate': grpc.unary_unary_rpc_method_handler(
                     servicer.MintActorCertificate,
@@ -693,7 +695,7 @@ def add_ControlServicer_to_server(servicer, server):
             'DrainWorker': grpc.unary_unary_rpc_method_handler(
                     servicer.DrainWorker,
                     request_deserializer=ateapi__pb2.DrainWorkerRequest.FromString,
-                    response_serializer=ateapi__pb2.Worker.SerializeToString,
+                    response_serializer=ateapi__pb2.DrainWorkerResponse.SerializeToString,
             ),
             'ListWorkerActorAssignments': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkerActorAssignments,
@@ -1117,7 +1119,7 @@ class Control:
             _registered_method=True)
 
     @staticmethod
-    def MintActorJWT(request,
+    def MintActorJwt(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1130,9 +1132,9 @@ class Control:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/ateapi.Control/MintActorJWT',
-            ateapi__pb2.MintActorJWTRequest.SerializeToString,
-            ateapi__pb2.MintActorJWTResponse.FromString,
+            '/ateapi.Control/MintActorJwt',
+            ateapi__pb2.MintActorJwtRequest.SerializeToString,
+            ateapi__pb2.MintActorJwtResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1456,7 +1458,7 @@ class Control:
             target,
             '/ateapi.Control/DrainWorker',
             ateapi__pb2.DrainWorkerRequest.SerializeToString,
-            ateapi__pb2.Worker.FromString,
+            ateapi__pb2.DrainWorkerResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1955,6 +1957,11 @@ class WorkerServiceStub:
                 request_serializer=ateapi__pb2.RequestActorSuspendRequest.SerializeToString,
                 response_deserializer=ateapi__pb2.RequestActorSuspendResponse.FromString,
                 _registered_method=True)
+        self.ReportActorSnapshotState = channel.unary_unary(
+                '/ateapi.WorkerService/ReportActorSnapshotState',
+                request_serializer=ateapi__pb2.ReportActorSnapshotStateRequest.SerializeToString,
+                response_deserializer=ateapi__pb2.ReportActorSnapshotStateResponse.FromString,
+                _registered_method=True)
 
 
 class WorkerServiceServicer:
@@ -2015,6 +2022,24 @@ class WorkerServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportActorSnapshotState(self, request, context):
+        """ReportActorSnapshotState records which snapshots of an Actor the calling
+        atelet holds on its node, and which of them are durable. Only atelet can
+        observe when an upload finishes or a local copy is deleted, and the
+        control plane needs both to decide where the Actor can resume.
+
+        Only atelet should call this, with its own client certificate. The
+        control plane serves it only for an Actor on the caller's node.
+        Idempotent: each report carries the whole state and replaces the previous
+        one. Returns ABORTED while another operation holds the Actor; retry.
+
+        TODO(#2570): not served yet. Every call returns UNIMPLEMENTED until the
+        handler lands.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -2032,6 +2057,11 @@ def add_WorkerServiceServicer_to_server(servicer, server):
                     servicer.RequestActorSuspend,
                     request_deserializer=ateapi__pb2.RequestActorSuspendRequest.FromString,
                     response_serializer=ateapi__pb2.RequestActorSuspendResponse.SerializeToString,
+            ),
+            'ReportActorSnapshotState': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportActorSnapshotState,
+                    request_deserializer=ateapi__pb2.ReportActorSnapshotStateRequest.FromString,
+                    response_serializer=ateapi__pb2.ReportActorSnapshotStateResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -2119,6 +2149,33 @@ class WorkerService:
             '/ateapi.WorkerService/RequestActorSuspend',
             ateapi__pb2.RequestActorSuspendRequest.SerializeToString,
             ateapi__pb2.RequestActorSuspendResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportActorSnapshotState(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateapi.WorkerService/ReportActorSnapshotState',
+            ateapi__pb2.ReportActorSnapshotStateRequest.SerializeToString,
+            ateapi__pb2.ReportActorSnapshotStateResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -84,7 +84,7 @@ print(f"rollouts={len(rows)} reward_mean={reward:.2f} errored={errored}")
 held = []
 for line in open(sys.argv[2]):
     counts = {s: int(n) for n, s in re.findall(r"(\d+) ACTOR_STATE_([A-Z]+)", line)}
-    held.append(sum(counts.get(s, 0) for s in ("RESUMING", "RUNNING", "PAUSING", "SUSPENDING")))
+    held.append(sum(counts.get(s, 0) for s in ("RESUMING", "RUNNING", "SUSPENDING")))
 if held:
     print(f"samples={len(held)} mean_held={sum(held) / len(held):.1f} max_held={max(held)} worker_seconds~{sum(held) * 5}")
 PY

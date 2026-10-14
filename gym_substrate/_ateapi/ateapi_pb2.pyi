@@ -16,16 +16,10 @@ class SnapshotOwner(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SNAPSHOT_OWNER_ACTOR: _ClassVar[SnapshotOwner]
     SNAPSHOT_OWNER_TAG: _ClassVar[SnapshotOwner]
 
-class SnapshotDurability(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    SNAPSHOT_DURABILITY_UNSPECIFIED: _ClassVar[SnapshotDurability]
-    SNAPSHOT_DURABILITY_LOCAL: _ClassVar[SnapshotDurability]
-    SNAPSHOT_DURABILITY_DURABLE: _ClassVar[SnapshotDurability]
-
 class SnapshotStorageStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     SNAPSHOT_STORAGE_STATUS_UNSPECIFIED: _ClassVar[SnapshotStorageStatus]
-    SNAPSHOT_STORAGE_STATUS_IN_PROGRESS: _ClassVar[SnapshotStorageStatus]
+    SNAPSHOT_STORAGE_STATUS_PENDING: _ClassVar[SnapshotStorageStatus]
     SNAPSHOT_STORAGE_STATUS_COMPLETED: _ClassVar[SnapshotStorageStatus]
 
 class SnapshotFidelity(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
@@ -48,8 +42,6 @@ class ActorState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ACTOR_STATE_RUNNING: _ClassVar[ActorState]
     ACTOR_STATE_SUSPENDING: _ClassVar[ActorState]
     ACTOR_STATE_SUSPENDED: _ClassVar[ActorState]
-    ACTOR_STATE_PAUSING: _ClassVar[ActorState]
-    ACTOR_STATE_PAUSED: _ClassVar[ActorState]
     ACTOR_STATE_CRASHED: _ClassVar[ActorState]
     ACTOR_STATE_DELETING: _ClassVar[ActorState]
     ACTOR_STATE_REVERTING: _ClassVar[ActorState]
@@ -59,6 +51,12 @@ class SandboxClass(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SANDBOX_CLASS_UNSPECIFIED: _ClassVar[SandboxClass]
     SANDBOX_CLASS_GVISOR: _ClassVar[SandboxClass]
     SANDBOX_CLASS_MICROVM: _ClassVar[SandboxClass]
+
+class GoldenSnapshotMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    GOLDEN_SNAPSHOT_MODE_UNSPECIFIED: _ClassVar[GoldenSnapshotMode]
+    GOLDEN_SNAPSHOT_MODE_ENABLED: _ClassVar[GoldenSnapshotMode]
+    GOLDEN_SNAPSHOT_MODE_DISABLED: _ClassVar[GoldenSnapshotMode]
 
 class ActorMetadataField(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -75,11 +73,8 @@ class WorkerState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
 SNAPSHOT_OWNER_UNSPECIFIED: SnapshotOwner
 SNAPSHOT_OWNER_ACTOR: SnapshotOwner
 SNAPSHOT_OWNER_TAG: SnapshotOwner
-SNAPSHOT_DURABILITY_UNSPECIFIED: SnapshotDurability
-SNAPSHOT_DURABILITY_LOCAL: SnapshotDurability
-SNAPSHOT_DURABILITY_DURABLE: SnapshotDurability
 SNAPSHOT_STORAGE_STATUS_UNSPECIFIED: SnapshotStorageStatus
-SNAPSHOT_STORAGE_STATUS_IN_PROGRESS: SnapshotStorageStatus
+SNAPSHOT_STORAGE_STATUS_PENDING: SnapshotStorageStatus
 SNAPSHOT_STORAGE_STATUS_COMPLETED: SnapshotStorageStatus
 SNAPSHOT_FIDELITY_UNSPECIFIED: SnapshotFidelity
 SNAPSHOT_FIDELITY_VOLUMES: SnapshotFidelity
@@ -93,14 +88,15 @@ ACTOR_STATE_RESUMING: ActorState
 ACTOR_STATE_RUNNING: ActorState
 ACTOR_STATE_SUSPENDING: ActorState
 ACTOR_STATE_SUSPENDED: ActorState
-ACTOR_STATE_PAUSING: ActorState
-ACTOR_STATE_PAUSED: ActorState
 ACTOR_STATE_CRASHED: ActorState
 ACTOR_STATE_DELETING: ActorState
 ACTOR_STATE_REVERTING: ActorState
 SANDBOX_CLASS_UNSPECIFIED: SandboxClass
 SANDBOX_CLASS_GVISOR: SandboxClass
 SANDBOX_CLASS_MICROVM: SandboxClass
+GOLDEN_SNAPSHOT_MODE_UNSPECIFIED: GoldenSnapshotMode
+GOLDEN_SNAPSHOT_MODE_ENABLED: GoldenSnapshotMode
+GOLDEN_SNAPSHOT_MODE_DISABLED: GoldenSnapshotMode
 ACTOR_METADATA_FIELD_UNSPECIFIED: ActorMetadataField
 ACTOR_METADATA_FIELD_NAME: ActorMetadataField
 ACTOR_METADATA_FIELD_ATESPACE: ActorMetadataField
@@ -115,37 +111,31 @@ class ObjectSnapshot(_message.Message):
     snapshot_uri: str
     def __init__(self, snapshot_uri: _Optional[str] = ...) -> None: ...
 
-class LocalSnapshot(_message.Message):
-    __slots__ = ("snapshot_name",)
-    SNAPSHOT_NAME_FIELD_NUMBER: _ClassVar[int]
-    snapshot_name: str
-    def __init__(self, snapshot_name: _Optional[str] = ...) -> None: ...
-
 class SnapshotStorage(_message.Message):
-    __slots__ = ("durability", "status", "fidelity", "local", "object")
-    DURABILITY_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("status", "object")
     STATUS_FIELD_NUMBER: _ClassVar[int]
-    FIDELITY_FIELD_NUMBER: _ClassVar[int]
-    LOCAL_FIELD_NUMBER: _ClassVar[int]
     OBJECT_FIELD_NUMBER: _ClassVar[int]
-    durability: SnapshotDurability
     status: SnapshotStorageStatus
-    fidelity: SnapshotFidelity
-    local: LocalSnapshot
     object: ObjectSnapshot
-    def __init__(self, durability: _Optional[_Union[SnapshotDurability, str]] = ..., status: _Optional[_Union[SnapshotStorageStatus, str]] = ..., fidelity: _Optional[_Union[SnapshotFidelity, str]] = ..., local: _Optional[_Union[LocalSnapshot, _Mapping]] = ..., object: _Optional[_Union[ObjectSnapshot, _Mapping]] = ...) -> None: ...
+    def __init__(self, status: _Optional[_Union[SnapshotStorageStatus, str]] = ..., object: _Optional[_Union[ObjectSnapshot, _Mapping]] = ...) -> None: ...
 
 class Snapshot(_message.Message):
-    __slots__ = ("generation", "owner", "actor_template_uid", "storage")
+    __slots__ = ("uuid", "generation", "owner", "fidelity", "actor_template_uid", "locality", "durable_snapshot")
+    UUID_FIELD_NUMBER: _ClassVar[int]
     GENERATION_FIELD_NUMBER: _ClassVar[int]
     OWNER_FIELD_NUMBER: _ClassVar[int]
+    FIDELITY_FIELD_NUMBER: _ClassVar[int]
     ACTOR_TEMPLATE_UID_FIELD_NUMBER: _ClassVar[int]
-    STORAGE_FIELD_NUMBER: _ClassVar[int]
+    LOCALITY_FIELD_NUMBER: _ClassVar[int]
+    DURABLE_SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
+    uuid: str
     generation: int
     owner: SnapshotOwner
+    fidelity: SnapshotFidelity
     actor_template_uid: str
-    storage: _containers.RepeatedCompositeFieldContainer[SnapshotStorage]
-    def __init__(self, generation: _Optional[int] = ..., owner: _Optional[_Union[SnapshotOwner, str]] = ..., actor_template_uid: _Optional[str] = ..., storage: _Optional[_Iterable[_Union[SnapshotStorage, _Mapping]]] = ...) -> None: ...
+    locality: str
+    durable_snapshot: SnapshotStorage
+    def __init__(self, uuid: _Optional[str] = ..., generation: _Optional[int] = ..., owner: _Optional[_Union[SnapshotOwner, str]] = ..., fidelity: _Optional[_Union[SnapshotFidelity, str]] = ..., actor_template_uid: _Optional[str] = ..., locality: _Optional[str] = ..., durable_snapshot: _Optional[_Union[SnapshotStorage, _Mapping]] = ...) -> None: ...
 
 class Selector(_message.Message):
     __slots__ = ("match_labels",)
@@ -234,12 +224,12 @@ class EgressRule(_message.Message):
     HTTP_FIELD_NUMBER: _ClassVar[int]
     HTTPS_FIELD_NUMBER: _ClassVar[int]
     TLS_PASSTHROUGH_FIELD_NUMBER: _ClassVar[int]
-    http: HTTPRule
-    https: HTTPSRule
-    tls_passthrough: TLSPassthroughRule
-    def __init__(self, http: _Optional[_Union[HTTPRule, _Mapping]] = ..., https: _Optional[_Union[HTTPSRule, _Mapping]] = ..., tls_passthrough: _Optional[_Union[TLSPassthroughRule, _Mapping]] = ...) -> None: ...
+    http: HttpRule
+    https: HttpsRule
+    tls_passthrough: TlsPassthroughRule
+    def __init__(self, http: _Optional[_Union[HttpRule, _Mapping]] = ..., https: _Optional[_Union[HttpsRule, _Mapping]] = ..., tls_passthrough: _Optional[_Union[TlsPassthroughRule, _Mapping]] = ...) -> None: ...
 
-class HTTPRule(_message.Message):
+class HttpRule(_message.Message):
     __slots__ = ("hostnames", "ports", "effects")
     HOSTNAMES_FIELD_NUMBER: _ClassVar[int]
     PORTS_FIELD_NUMBER: _ClassVar[int]
@@ -249,7 +239,7 @@ class HTTPRule(_message.Message):
     effects: HttpRuleEffects
     def __init__(self, hostnames: _Optional[_Iterable[str]] = ..., ports: _Optional[_Union[Ports, _Mapping]] = ..., effects: _Optional[_Union[HttpRuleEffects, _Mapping]] = ...) -> None: ...
 
-class HTTPSRule(_message.Message):
+class HttpsRule(_message.Message):
     __slots__ = ("hostnames", "ports", "effects")
     HOSTNAMES_FIELD_NUMBER: _ClassVar[int]
     PORTS_FIELD_NUMBER: _ClassVar[int]
@@ -259,7 +249,7 @@ class HTTPSRule(_message.Message):
     effects: HttpRuleEffects
     def __init__(self, hostnames: _Optional[_Iterable[str]] = ..., ports: _Optional[_Union[Ports, _Mapping]] = ..., effects: _Optional[_Union[HttpRuleEffects, _Mapping]] = ...) -> None: ...
 
-class TLSPassthroughRule(_message.Message):
+class TlsPassthroughRule(_message.Message):
     __slots__ = ("hostnames", "ports")
     HOSTNAMES_FIELD_NUMBER: _ClassVar[int]
     PORTS_FIELD_NUMBER: _ClassVar[int]
@@ -294,10 +284,10 @@ class CredentialHeader(_message.Message):
     header: str
     prefix: str
     credential_uri: str
-    actor_jwt: ActorJWTSource
-    def __init__(self, header: _Optional[str] = ..., prefix: _Optional[str] = ..., credential_uri: _Optional[str] = ..., actor_jwt: _Optional[_Union[ActorJWTSource, _Mapping]] = ...) -> None: ...
+    actor_jwt: ActorJwtSource
+    def __init__(self, header: _Optional[str] = ..., prefix: _Optional[str] = ..., credential_uri: _Optional[str] = ..., actor_jwt: _Optional[_Union[ActorJwtSource, _Mapping]] = ...) -> None: ...
 
-class ActorJWTSource(_message.Message):
+class ActorJwtSource(_message.Message):
     __slots__ = ("audiences", "expiration_seconds")
     AUDIENCES_FIELD_NUMBER: _ClassVar[int]
     EXPIRATION_SECONDS_FIELD_NUMBER: _ClassVar[int]
@@ -420,14 +410,14 @@ class Limits(_message.Message):
     def __init__(self, name: _Optional[str] = ..., quantity: _Optional[str] = ...) -> None: ...
 
 class GoldenSnapshotStatus(_message.Message):
-    __slots__ = ("golden_tag", "take_golden_snapshot_at", "error_message")
+    __slots__ = ("golden_tag", "snapshot_time", "error_message")
     GOLDEN_TAG_FIELD_NUMBER: _ClassVar[int]
-    TAKE_GOLDEN_SNAPSHOT_AT_FIELD_NUMBER: _ClassVar[int]
+    SNAPSHOT_TIME_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     golden_tag: ObjectRef
-    take_golden_snapshot_at: _timestamp_pb2.Timestamp
+    snapshot_time: _timestamp_pb2.Timestamp
     error_message: str
-    def __init__(self, golden_tag: _Optional[_Union[ObjectRef, _Mapping]] = ..., take_golden_snapshot_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., error_message: _Optional[str] = ...) -> None: ...
+    def __init__(self, golden_tag: _Optional[_Union[ObjectRef, _Mapping]] = ..., snapshot_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., error_message: _Optional[str] = ...) -> None: ...
 
 class ActorTemplateStatus(_message.Message):
     __slots__ = ("golden_snapshot_status",)
@@ -444,12 +434,20 @@ class SandboxConfig(_message.Message):
     def __init__(self, sandbox_class: _Optional[_Union[SandboxClass, str]] = ..., config_name: _Optional[str] = ...) -> None: ...
 
 class SnapshotConfig(_message.Message):
-    __slots__ = ("storage_location", "preferred_fidelity")
+    __slots__ = ("storage_location", "preferred_fidelity", "golden_snapshot_config")
     STORAGE_LOCATION_FIELD_NUMBER: _ClassVar[int]
     PREFERRED_FIDELITY_FIELD_NUMBER: _ClassVar[int]
+    GOLDEN_SNAPSHOT_CONFIG_FIELD_NUMBER: _ClassVar[int]
     storage_location: str
     preferred_fidelity: SnapshotFidelity
-    def __init__(self, storage_location: _Optional[str] = ..., preferred_fidelity: _Optional[_Union[SnapshotFidelity, str]] = ...) -> None: ...
+    golden_snapshot_config: GoldenSnapshotConfig
+    def __init__(self, storage_location: _Optional[str] = ..., preferred_fidelity: _Optional[_Union[SnapshotFidelity, str]] = ..., golden_snapshot_config: _Optional[_Union[GoldenSnapshotConfig, _Mapping]] = ...) -> None: ...
+
+class GoldenSnapshotConfig(_message.Message):
+    __slots__ = ("mode",)
+    MODE_FIELD_NUMBER: _ClassVar[int]
+    mode: GoldenSnapshotMode
+    def __init__(self, mode: _Optional[_Union[GoldenSnapshotMode, str]] = ...) -> None: ...
 
 class Container(_message.Message):
     __slots__ = ("name", "image", "command", "args", "env", "wakeup_probe", "volume_mounts", "security_context", "resources")
@@ -467,11 +465,11 @@ class Container(_message.Message):
     command: _containers.RepeatedScalarFieldContainer[str]
     args: _containers.RepeatedScalarFieldContainer[str]
     env: _containers.RepeatedCompositeFieldContainer[EnvVar]
-    wakeup_probe: ContainerWakeupProbe
+    wakeup_probe: WakeupProbe
     volume_mounts: _containers.RepeatedCompositeFieldContainer[VolumeMount]
     security_context: SecurityContext
     resources: Resources
-    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., args: _Optional[_Iterable[str]] = ..., env: _Optional[_Iterable[_Union[EnvVar, _Mapping]]] = ..., wakeup_probe: _Optional[_Union[ContainerWakeupProbe, _Mapping]] = ..., volume_mounts: _Optional[_Iterable[_Union[VolumeMount, _Mapping]]] = ..., security_context: _Optional[_Union[SecurityContext, _Mapping]] = ..., resources: _Optional[_Union[Resources, _Mapping]] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., args: _Optional[_Iterable[str]] = ..., env: _Optional[_Iterable[_Union[EnvVar, _Mapping]]] = ..., wakeup_probe: _Optional[_Union[WakeupProbe, _Mapping]] = ..., volume_mounts: _Optional[_Iterable[_Union[VolumeMount, _Mapping]]] = ..., security_context: _Optional[_Union[SecurityContext, _Mapping]] = ..., resources: _Optional[_Union[Resources, _Mapping]] = ...) -> None: ...
 
 class SecurityContext(_message.Message):
     __slots__ = ("capabilities",)
@@ -495,15 +493,15 @@ class EnvVar(_message.Message):
     value: str
     def __init__(self, name: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
 
-class ContainerWakeupProbe(_message.Message):
+class WakeupProbe(_message.Message):
     __slots__ = ("http_get", "timeout_seconds")
     HTTP_GET_FIELD_NUMBER: _ClassVar[int]
     TIMEOUT_SECONDS_FIELD_NUMBER: _ClassVar[int]
-    http_get: HTTPGetAction
+    http_get: HttpGetAction
     timeout_seconds: int
-    def __init__(self, http_get: _Optional[_Union[HTTPGetAction, _Mapping]] = ..., timeout_seconds: _Optional[int] = ...) -> None: ...
+    def __init__(self, http_get: _Optional[_Union[HttpGetAction, _Mapping]] = ..., timeout_seconds: _Optional[int] = ...) -> None: ...
 
-class HTTPGetAction(_message.Message):
+class HttpGetAction(_message.Message):
     __slots__ = ("path", "port")
     PATH_FIELD_NUMBER: _ClassVar[int]
     PORT_FIELD_NUMBER: _ClassVar[int]
@@ -600,12 +598,10 @@ class GetAtespaceRequest(_message.Message):
     def __init__(self, atespace: _Optional[_Union[ObjectRef, _Mapping]] = ...) -> None: ...
 
 class ListAtespacesRequest(_message.Message):
-    __slots__ = ("page_size", "page_token")
-    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    page_size: int
-    page_token: str
-    def __init__(self, page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+    __slots__ = ("options",)
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    options: ListOptions
+    def __init__(self, options: _Optional[_Union[ListOptions, _Mapping]] = ...) -> None: ...
 
 class ListAtespacesResponse(_message.Message):
     __slots__ = ("atespaces", "next_page_token")
@@ -636,14 +632,12 @@ class GetActorTemplateRequest(_message.Message):
     def __init__(self, actor_template: _Optional[_Union[ObjectRef, _Mapping]] = ...) -> None: ...
 
 class ListActorTemplatesRequest(_message.Message):
-    __slots__ = ("atespace", "page_size", "page_token")
+    __slots__ = ("atespace", "options")
     ATESPACE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
     atespace: str
-    page_size: int
-    page_token: str
-    def __init__(self, atespace: _Optional[str] = ..., page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+    options: ListOptions
+    def __init__(self, atespace: _Optional[str] = ..., options: _Optional[_Union[ListOptions, _Mapping]] = ...) -> None: ...
 
 class ListActorTemplatesResponse(_message.Message):
     __slots__ = ("actor_templates", "next_page_token")
@@ -740,10 +734,12 @@ class DeleteActorRequest(_message.Message):
     def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., any_state: _Optional[bool] = ..., options: _Optional[_Union[DeleteOptions, _Mapping]] = ...) -> None: ...
 
 class GetActorEgressPolicyRequest(_message.Message):
-    __slots__ = ("actor",)
+    __slots__ = ("actor", "name")
     ACTOR_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     actor: ObjectRef
-    def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ...) -> None: ...
+    name: str
+    def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., name: _Optional[str] = ...) -> None: ...
 
 class CreateActorEgressPolicyRequest(_message.Message):
     __slots__ = ("actor", "egress_policy")
@@ -762,12 +758,14 @@ class UpdateActorEgressPolicyRequest(_message.Message):
     def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., egress_policy: _Optional[_Union[EgressPolicy, _Mapping]] = ...) -> None: ...
 
 class DeleteActorEgressPolicyRequest(_message.Message):
-    __slots__ = ("actor", "options")
+    __slots__ = ("actor", "name", "options")
     ACTOR_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     OPTIONS_FIELD_NUMBER: _ClassVar[int]
     actor: ObjectRef
+    name: str
     options: DeleteOptions
-    def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., options: _Optional[_Union[DeleteOptions, _Mapping]] = ...) -> None: ...
+    def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., name: _Optional[str] = ..., options: _Optional[_Union[DeleteOptions, _Mapping]] = ...) -> None: ...
 
 class GetTagRequest(_message.Message):
     __slots__ = ("tag",)
@@ -775,7 +773,7 @@ class GetTagRequest(_message.Message):
     tag: ObjectRef
     def __init__(self, tag: _Optional[_Union[ObjectRef, _Mapping]] = ...) -> None: ...
 
-class MintActorJWTRequest(_message.Message):
+class MintActorJwtRequest(_message.Message):
     __slots__ = ("actor", "audiences", "expiration_seconds")
     ACTOR_FIELD_NUMBER: _ClassVar[int]
     AUDIENCES_FIELD_NUMBER: _ClassVar[int]
@@ -785,13 +783,13 @@ class MintActorJWTRequest(_message.Message):
     expiration_seconds: int
     def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., audiences: _Optional[_Iterable[str]] = ..., expiration_seconds: _Optional[int] = ...) -> None: ...
 
-class MintActorJWTResponse(_message.Message):
-    __slots__ = ("actor_jwt", "expires_at")
+class MintActorJwtResponse(_message.Message):
+    __slots__ = ("actor_jwt", "expire_time")
     ACTOR_JWT_FIELD_NUMBER: _ClassVar[int]
-    EXPIRES_AT_FIELD_NUMBER: _ClassVar[int]
+    EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
     actor_jwt: str
-    expires_at: _timestamp_pb2.Timestamp
-    def __init__(self, actor_jwt: _Optional[str] = ..., expires_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    expire_time: _timestamp_pb2.Timestamp
+    def __init__(self, actor_jwt: _Optional[str] = ..., expire_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class MintActorCertificateRequest(_message.Message):
     __slots__ = ("actor", "actor_uid", "certificate_signing_request")
@@ -810,14 +808,12 @@ class MintActorCertificateResponse(_message.Message):
     def __init__(self, actor_certificates: _Optional[_Iterable[bytes]] = ...) -> None: ...
 
 class ListTagsRequest(_message.Message):
-    __slots__ = ("atespace", "page_size", "page_token")
+    __slots__ = ("atespace", "options")
     ATESPACE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
     atespace: str
-    page_size: int
-    page_token: str
-    def __init__(self, atespace: _Optional[str] = ..., page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+    options: ListOptions
+    def __init__(self, atespace: _Optional[str] = ..., options: _Optional[_Union[ListOptions, _Mapping]] = ...) -> None: ...
 
 class ListTagsResponse(_message.Message):
     __slots__ = ("tags", "next_page_token")
@@ -855,15 +851,21 @@ class DeleteOptions(_message.Message):
     uid: str
     def __init__(self, version: _Optional[int] = ..., uid: _Optional[str] = ...) -> None: ...
 
-class ListWorkerActorAssignmentsRequest(_message.Message):
-    __slots__ = ("worker", "page_size", "page_token")
-    WORKER_FIELD_NUMBER: _ClassVar[int]
+class ListOptions(_message.Message):
+    __slots__ = ("page_size", "page_token")
     PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
     PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    worker: ObjectRef
     page_size: int
     page_token: str
-    def __init__(self, worker: _Optional[_Union[ObjectRef, _Mapping]] = ..., page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+    def __init__(self, page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+
+class ListWorkerActorAssignmentsRequest(_message.Message):
+    __slots__ = ("worker", "options")
+    WORKER_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    worker: ObjectRef
+    options: ListOptions
+    def __init__(self, worker: _Optional[_Union[ObjectRef, _Mapping]] = ..., options: _Optional[_Union[ListOptions, _Mapping]] = ...) -> None: ...
 
 class ListWorkerActorAssignmentsResponse(_message.Message):
     __slots__ = ("actor_assignments", "next_page_token")
@@ -874,12 +876,10 @@ class ListWorkerActorAssignmentsResponse(_message.Message):
     def __init__(self, actor_assignments: _Optional[_Iterable[_Union[ActorAssignment, _Mapping]]] = ..., next_page_token: _Optional[str] = ...) -> None: ...
 
 class ListWorkersRequest(_message.Message):
-    __slots__ = ("page_size", "page_token")
-    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    page_size: int
-    page_token: str
-    def __init__(self, page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+    __slots__ = ("options",)
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    options: ListOptions
+    def __init__(self, options: _Optional[_Union[ListOptions, _Mapping]] = ...) -> None: ...
 
 class ListWorkersResponse(_message.Message):
     __slots__ = ("workers", "next_page_token")
@@ -921,15 +921,19 @@ class DrainWorkerRequest(_message.Message):
     worker: ObjectRef
     def __init__(self, worker: _Optional[_Union[ObjectRef, _Mapping]] = ...) -> None: ...
 
+class DrainWorkerResponse(_message.Message):
+    __slots__ = ("worker",)
+    WORKER_FIELD_NUMBER: _ClassVar[int]
+    worker: Worker
+    def __init__(self, worker: _Optional[_Union[Worker, _Mapping]] = ...) -> None: ...
+
 class ListActorsRequest(_message.Message):
-    __slots__ = ("atespace", "page_size", "page_token")
+    __slots__ = ("atespace", "options")
     ATESPACE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
-    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
     atespace: str
-    page_size: int
-    page_token: str
-    def __init__(self, atespace: _Optional[str] = ..., page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+    options: ListOptions
+    def __init__(self, atespace: _Optional[str] = ..., options: _Optional[_Union[ListOptions, _Mapping]] = ...) -> None: ...
 
 class ListActorsResponse(_message.Message):
     __slots__ = ("actors", "next_page_token")
@@ -1084,6 +1088,48 @@ class RequestActorSuspendResponse(_message.Message):
     actor: Actor
     def __init__(self, actor: _Optional[_Union[Actor, _Mapping]] = ...) -> None: ...
 
+class ReportActorSnapshotStateRequest(_message.Message):
+    __slots__ = ("actor", "actor_uid", "state")
+    ACTOR_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_UID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    actor: ObjectRef
+    actor_uid: str
+    state: ActorSnapshotState
+    def __init__(self, actor: _Optional[_Union[ObjectRef, _Mapping]] = ..., actor_uid: _Optional[str] = ..., state: _Optional[_Union[ActorSnapshotState, _Mapping]] = ...) -> None: ...
+
+class ReportActorSnapshotStateResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ActorSnapshotState(_message.Message):
+    __slots__ = ("latest_local", "uploading", "latest_durable", "upload_due_time")
+    LATEST_LOCAL_FIELD_NUMBER: _ClassVar[int]
+    UPLOADING_FIELD_NUMBER: _ClassVar[int]
+    LATEST_DURABLE_FIELD_NUMBER: _ClassVar[int]
+    UPLOAD_DUE_TIME_FIELD_NUMBER: _ClassVar[int]
+    latest_local: SnapshotReport
+    uploading: SnapshotReport
+    latest_durable: SnapshotReport
+    upload_due_time: _timestamp_pb2.Timestamp
+    def __init__(self, latest_local: _Optional[_Union[SnapshotReport, _Mapping]] = ..., uploading: _Optional[_Union[SnapshotReport, _Mapping]] = ..., latest_durable: _Optional[_Union[SnapshotReport, _Mapping]] = ..., upload_due_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class SnapshotReport(_message.Message):
+    __slots__ = ("uuid", "generation", "fidelity", "object", "local_commit_time", "durable_complete_time")
+    UUID_FIELD_NUMBER: _ClassVar[int]
+    GENERATION_FIELD_NUMBER: _ClassVar[int]
+    FIDELITY_FIELD_NUMBER: _ClassVar[int]
+    OBJECT_FIELD_NUMBER: _ClassVar[int]
+    LOCAL_COMMIT_TIME_FIELD_NUMBER: _ClassVar[int]
+    DURABLE_COMPLETE_TIME_FIELD_NUMBER: _ClassVar[int]
+    uuid: str
+    generation: int
+    fidelity: SnapshotFidelity
+    object: ObjectSnapshot
+    local_commit_time: _timestamp_pb2.Timestamp
+    durable_complete_time: _timestamp_pb2.Timestamp
+    def __init__(self, uuid: _Optional[str] = ..., generation: _Optional[int] = ..., fidelity: _Optional[_Union[SnapshotFidelity, str]] = ..., object: _Optional[_Union[ObjectSnapshot, _Mapping]] = ..., local_commit_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., durable_complete_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
 class AccessPolicy(_message.Message):
     __slots__ = ("metadata", "bindings")
     METADATA_FIELD_NUMBER: _ClassVar[int]
@@ -1101,8 +1147,10 @@ class Binding(_message.Message):
     def __init__(self, role: _Optional[str] = ..., members: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class GetGlobalAccessPolicyRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("name",)
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
 
 class CreateGlobalAccessPolicyRequest(_message.Message):
     __slots__ = ("access_policy",)
@@ -1117,10 +1165,12 @@ class UpdateGlobalAccessPolicyRequest(_message.Message):
     def __init__(self, access_policy: _Optional[_Union[AccessPolicy, _Mapping]] = ...) -> None: ...
 
 class GetAtespaceAccessPolicyRequest(_message.Message):
-    __slots__ = ("atespace",)
+    __slots__ = ("atespace", "name")
     ATESPACE_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     atespace: ObjectRef
-    def __init__(self, atespace: _Optional[_Union[ObjectRef, _Mapping]] = ...) -> None: ...
+    name: str
+    def __init__(self, atespace: _Optional[_Union[ObjectRef, _Mapping]] = ..., name: _Optional[str] = ...) -> None: ...
 
 class CreateAtespaceAccessPolicyRequest(_message.Message):
     __slots__ = ("atespace", "access_policy")
@@ -1139,9 +1189,11 @@ class UpdateAtespaceAccessPolicyRequest(_message.Message):
     def __init__(self, atespace: _Optional[_Union[ObjectRef, _Mapping]] = ..., access_policy: _Optional[_Union[AccessPolicy, _Mapping]] = ...) -> None: ...
 
 class DeleteAtespaceAccessPolicyRequest(_message.Message):
-    __slots__ = ("atespace", "options")
+    __slots__ = ("atespace", "name", "options")
     ATESPACE_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     OPTIONS_FIELD_NUMBER: _ClassVar[int]
     atespace: ObjectRef
+    name: str
     options: DeleteOptions
-    def __init__(self, atespace: _Optional[_Union[ObjectRef, _Mapping]] = ..., options: _Optional[_Union[DeleteOptions, _Mapping]] = ...) -> None: ...
+    def __init__(self, atespace: _Optional[_Union[ObjectRef, _Mapping]] = ..., name: _Optional[str] = ..., options: _Optional[_Union[DeleteOptions, _Mapping]] = ...) -> None: ...

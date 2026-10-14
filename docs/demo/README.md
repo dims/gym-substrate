@@ -108,6 +108,10 @@ replay policy.
 
 ## 3. Watch one sandbox park and resume
 
+The recorded output below predates Substrate merging `PAUSED` into `SUSPENDED`.
+Current runs report `SUSPENDED` for both policies; the smoke checks that a pause
+has a local-only snapshot and a suspend has a completed durable snapshot.
+
 The smoke drives the provider directly, without Gym:
 
 ```bash

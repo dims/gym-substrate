@@ -40,7 +40,7 @@ def test_delete_actors_selects_by_name_or_state_only() -> None:
     actors = [
         _actor("gym-a", ateapi_pb2.ActorState.ACTOR_STATE_RUNNING),
         _actor("gym-b", ateapi_pb2.ActorState.ACTOR_STATE_CRASHED),
-        _actor("gym-c", ateapi_pb2.ActorState.ACTOR_STATE_PAUSED),
+        _actor("gym-c", ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED),
     ]
     names = lambda chosen: [a.metadata.name for a in chosen]  # noqa: E731
 
@@ -55,3 +55,23 @@ def test_delete_actors_refuses_an_unscoped_call() -> None:
     with pytest.raises(SystemExit):
         delete_actors.parse(["nemo-gym"])
     assert delete_actors.parse(["nemo-gym", "--state", "CRASHED"]).state == ["CRASHED"]
+
+
+@pytest.mark.parametrize(
+    "state,locality,durable,expected",
+    [
+        ("SUSPENDED", "node-1", False, (True, False)),
+        ("SUSPENDED", "node-1", True, (False, True)),
+        ("SUSPENDED", "", False, (False, False)),
+        ("RUNNING", "node-1", False, (False, False)),
+    ],
+)
+def test_smoke_distinguishes_local_pause_from_durable_suspend(state, locality, durable, expected):
+    smoke = _load("smoke_provider")
+    actor = _actor("gym-a", ateapi_pb2.ActorState.Value("ACTOR_STATE_" + state))
+    actor.status.snapshots.add(generation=1, locality="older-node")
+    latest = actor.status.snapshots.add(generation=2, locality=locality)
+    if durable:
+        latest.durable_snapshot.status = ateapi_pb2.SNAPSHOT_STORAGE_STATUS_COMPLETED
+    assert smoke.is_parked(actor, "pause_after_exec") == expected[0]
+    assert smoke.is_parked(actor, "after_exec") == expected[1]

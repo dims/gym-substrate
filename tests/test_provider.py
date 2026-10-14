@@ -79,7 +79,7 @@ class _Recorder:
             state = self._get_actor_state
             if state is None:
                 state = (
-                    ateapi_pb2.ActorState.ACTOR_STATE_PAUSED
+                    ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED
                     if self._parked
                     else ateapi_pb2.ActorState.ACTOR_STATE_RUNNING
                 )
@@ -310,7 +310,7 @@ async def test_exec_waits_for_a_pause_already_in_flight() -> None:
     await provider.exec(handle, "step 2")
 
     # The second exec went out only after the pause completed, so the router
-    # saw a PAUSED actor to resume, never a PAUSING one.
+    # saw a SUSPENDED actor to resume, never a SUSPENDING one.
     execs = [i for i, event in enumerate(recorder.events) if event == ("http", "/exec")]
     pause = recorder.events.index(("control", "PauseActor"))
     assert execs[0] < pause < execs[1]
@@ -331,7 +331,7 @@ async def test_exec_retries_while_the_actor_is_mid_transition(monkeypatch: pytes
             return httpx.Response(
                 503,
                 text="actor nemo-gym/gym-x unavailable: AssignWorker prerequisite not met for Actor: "
-                "nemo-gym/gym-x (got: ACTOR_STATE_PAUSING, want ACTOR_STATE_SUSPENDED or ACTOR_STATE_PAUSED)",
+                "nemo-gym/gym-x (got: ACTOR_STATE_SUSPENDING, want ACTOR_STATE_SUSPENDED)",
             )
         return httpx.Response(200, json={"stdout": "ok", "stderr": "", "exit_code": 0})
 
@@ -348,9 +348,9 @@ async def test_exec_retries_while_the_actor_is_mid_transition(monkeypatch: pytes
     "body",
     [
         "actor nemo-gym/gym-x unavailable: AssignWorker prerequisite not met for Actor: nemo-gym/gym-x "
-        "(got: ACTOR_STATE_CRASHED, want ACTOR_STATE_SUSPENDED or ACTOR_STATE_PAUSED)",
+        "(got: ACTOR_STATE_CRASHED, want ACTOR_STATE_SUSPENDED)",
         "actor nemo-gym/gym-x unavailable: AssignWorker prerequisite not met for Actor: nemo-gym/gym-x "
-        "(got: ACTOR_STATE_DELETING, want ACTOR_STATE_SUSPENDED or ACTOR_STATE_PAUSED)",
+        "(got: ACTOR_STATE_DELETING, want ACTOR_STATE_SUSPENDED)",
     ],
 )
 async def test_exec_fails_fast_when_the_actor_is_gone(body: str) -> None:
@@ -413,7 +413,7 @@ async def test_transient_503_retries_are_bounded(monkeypatch: pytest.MonkeyPatch
         execs += 1
         return httpx.Response(
             503,
-            text="actor nemo-gym/gym-x unavailable: AssignWorker prerequisite not met (got: ACTOR_STATE_PAUSING, want ...)",
+            text="actor nemo-gym/gym-x unavailable: AssignWorker prerequisite not met (got: ACTOR_STATE_SUSPENDING, want ...)",
         )
 
     provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)
@@ -540,7 +540,7 @@ async def test_exec_retries_a_capacity_503_until_the_router_has_room() -> None:
 
 
 async def test_pause_waits_for_parked_state_and_resume_probes_through_the_router() -> None:
-    recorder = _Recorder(get_actor_state=ateapi_pb2.ActorState.ACTOR_STATE_PAUSED)
+    recorder = _Recorder(get_actor_state=ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED)
     provider = _make_provider(recorder)
     handle = await provider.create(SandboxSpec(image=IMAGE))
     probes_before = recorder.http_paths.count("/readyz")
@@ -647,7 +647,6 @@ def test_router_target_is_atespace_slash_actor() -> None:
         (ateapi_pb2.ActorState.ACTOR_STATE_RUNNING, SandboxStatus.RUNNING),
         (ateapi_pb2.ActorState.ACTOR_STATE_RESUMING, SandboxStatus.STARTING),
         (ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED, SandboxStatus.PAUSED),
-        (ateapi_pb2.ActorState.ACTOR_STATE_PAUSED, SandboxStatus.PAUSED),
         (ateapi_pb2.ActorState.ACTOR_STATE_CRASHED, SandboxStatus.ERROR),
         (ateapi_pb2.ActorState.ACTOR_STATE_DELETING, SandboxStatus.STOPPED),
         (ateapi_pb2.ActorState.ACTOR_STATE_UNSPECIFIED, SandboxStatus.UNKNOWN),

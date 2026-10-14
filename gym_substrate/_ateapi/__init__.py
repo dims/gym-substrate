@@ -22,6 +22,6 @@ from gym_substrate._ateapi import ateapi_pb2, ateapi_pb2_grpc
 
 
 # Substrate commit whose pkg/proto/ateapipb/ateapi.proto these stubs were generated from.
-SUBSTRATE_COMMIT = "59072f7b68d3bb0a241459aa567275e016d19a4d"
+SUBSTRATE_COMMIT = "aba56bb712ce41b10de4565f4aedfa9f20b651af"
 
 __all__ = ["SUBSTRATE_COMMIT", "ateapi_pb2", "ateapi_pb2_grpc"]

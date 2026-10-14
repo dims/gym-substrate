@@ -16,7 +16,7 @@
 """Delete actors in an atespace by name or by state.
 
     ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE NAME...
-    ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --state CRASHED --state PAUSED
+    ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --state CRASHED --state SUSPENDED
     ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --all
 
 Deletes with any_state, so a running, paused or mid-transition actor goes too.
@@ -49,7 +49,10 @@ async def list_actors(provider, atespace):
     actors, token = [], ""
     while True:
         page = await provider._control(
-            "ListActors", ateapi_pb2.ListActorsRequest(atespace=atespace, page_size=200, page_token=token)
+            "ListActors",
+            ateapi_pb2.ListActorsRequest(
+                atespace=atespace, options=ateapi_pb2.ListOptions(page_size=200, page_token=token)
+            ),
         )
         actors.extend(page.actors)
         token = page.next_page_token
