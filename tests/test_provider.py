@@ -33,6 +33,15 @@ IMAGE = "docker://registry.example/swebench:latest"
 TEMPLATE_NAMESPACE = "ate-swebench"
 
 
+def _park_label(rpc: str, request: Any) -> str:
+    """SuspendActor as "pause" (asynchronous) or "suspend" (synchronous); any other RPC by name."""
+    if rpc != "SuspendActor":
+        return rpc
+    if request.options.mode == ateapi_pb2.DurabilityMode.DURABILITY_MODE_ASYNCHRONOUS:
+        return "pause"
+    return "suspend"
+
+
 class _Recorder:
     """Stand-in for the ateapi control plane and the atenet router.
 
@@ -62,18 +71,18 @@ class _Recorder:
         self._pause_delay_s = pause_delay_s
         # Interleaved control and HTTP activity, in completion order.
         self.events: list[tuple[str, str]] = []
-        # The fake control plane parks on PauseActor and the fake router
-        # resumes on the next request, like the real ones.
+        # The fake control plane parks on SuspendActor (either mode) and the
+        # fake router resumes on the next request, like the real ones.
         self._parked = False
 
     async def control(self, rpc: str, request: Any) -> Any:
         self.control_calls.append((rpc, request))
-        if rpc == "PauseActor" and self._pause_delay_s:
+        if _park_label(rpc, request) == "pause" and self._pause_delay_s:
             await asyncio.sleep(self._pause_delay_s)
-        self.events.append(("control", rpc))
+        self.events.append(("control", _park_label(rpc, request)))
         if rpc == "CreateActor" and self._create_error is not None:
             raise self._create_error
-        if rpc in ("PauseActor", "SuspendActor"):
+        if rpc == "SuspendActor":
             self._parked = True
         if rpc == "GetActor":
             state = self._get_actor_state
@@ -114,7 +123,8 @@ class _Recorder:
         return httpx.Response(self._probe_status)
 
     def rpcs(self) -> list[str]:
-        return [rpc for rpc, _ in self.control_calls]
+        """The control calls in order; a SuspendActor is "pause" or "suspend" by its mode."""
+        return [_park_label(rpc, request) for rpc, request in self.control_calls]
 
 
 def _make_provider(
@@ -200,7 +210,7 @@ async def test_create_references_template_by_objectref_then_probes_and_uploads()
     # Readiness is verified before any file lands, and the seed file is uploaded.
     assert recorder.http_paths[0] == "/readyz"
     assert "/upload" in recorder.http_paths
-    assert "PauseActor" not in recorder.rpcs()
+    assert "pause" not in recorder.rpcs()
 
 
 async def test_create_parks_the_actor_until_its_first_command() -> None:
@@ -210,12 +220,12 @@ async def test_create_parks_the_actor_until_its_first_command() -> None:
     handle = await provider.create(SandboxSpec(image=IMAGE, files={"/work/seed.txt": "hi"}))
 
     # Ready and seeded first, then parked: the worker is free during the first think time.
-    assert recorder.rpcs().count("PauseActor") == 1
-    assert recorder.events.index(("http", "/upload")) < recorder.events.index(("control", "PauseActor"))
+    assert recorder.rpcs().count("pause") == 1
+    assert recorder.events.index(("http", "/upload")) < recorder.events.index(("control", "pause"))
 
     await provider.exec(handle, "echo hi")
     # The router resumes the actor for the first exec; the exec parks it again.
-    assert recorder.rpcs().count("PauseActor") == 2
+    assert recorder.rpcs().count("pause") == 2
 
 
 async def test_create_raises_when_template_missing() -> None:
@@ -235,7 +245,7 @@ async def test_exec_parses_result_and_suspends_after_exec() -> None:
 
     assert (result.stdout, result.stderr, result.return_code) == ("done", "e", 3)
     # The defining behavior: the actor is suspended once the exec returns (and once after create).
-    assert recorder.rpcs().count("SuspendActor") == 2
+    assert recorder.rpcs().count("suspend") == 2
 
 
 async def test_exec_never_policy_leaves_actor_running() -> None:
@@ -245,21 +255,21 @@ async def test_exec_never_policy_leaves_actor_running() -> None:
 
     await provider.exec(handle, "echo hi")
 
-    assert "SuspendActor" not in recorder.rpcs()
+    assert "suspend" not in recorder.rpcs()
 
 
 async def test_exec_router_5xx_is_reported_as_sandbox_failure() -> None:
     recorder = _Recorder(exec_status=503, exec_body={})
     provider = _make_provider(recorder, suspend_policy="after_exec")
     handle = await provider.create(SandboxSpec(image=IMAGE))
-    suspends_after_create = recorder.rpcs().count("SuspendActor")
+    suspends_after_create = recorder.rpcs().count("suspend")
 
     result = await provider.exec(handle, "true")
 
     assert result.error_type == "sandbox"
     assert result.return_code == substrate_provider.SANDBOX_RUNTIME_RETURN_CODE
     # A sandbox failure is not a suspend point; the actor is left as-is.
-    assert recorder.rpcs().count("SuspendActor") == suspends_after_create
+    assert recorder.rpcs().count("suspend") == suspends_after_create
 
 
 async def test_exec_pause_policy_pauses_after_exec() -> None:
@@ -269,8 +279,8 @@ async def test_exec_pause_policy_pauses_after_exec() -> None:
 
     await provider.exec(handle, "echo hi")
 
-    assert recorder.rpcs().count("PauseActor") == 2  # after create, after the exec
-    assert "SuspendActor" not in recorder.rpcs()
+    assert recorder.rpcs().count("pause") == 2  # after create, after the exec
+    assert "suspend" not in recorder.rpcs()
 
 
 async def test_exec_never_pauses_while_another_exec_is_in_flight() -> None:
@@ -278,12 +288,12 @@ async def test_exec_never_pauses_while_another_exec_is_in_flight() -> None:
     provider = _make_provider(recorder, suspend_policy="pause_after_exec")
     handle = await provider.create(SandboxSpec(image=IMAGE))
 
-    pauses_after_create = recorder.rpcs().count("PauseActor")
+    pauses_after_create = recorder.rpcs().count("pause")
 
     await asyncio.gather(provider.exec(handle, "sleep 1"), provider.exec(handle, "sleep 1"))
 
     # Only the exec that found the actor idle pauses it.
-    assert recorder.rpcs().count("PauseActor") == pauses_after_create + 1
+    assert recorder.rpcs().count("pause") == pauses_after_create + 1
 
 
 async def test_idle_delay_defers_the_pause_and_a_new_exec_cancels_it() -> None:
@@ -292,12 +302,12 @@ async def test_idle_delay_defers_the_pause_and_a_new_exec_cancels_it() -> None:
     handle = await provider.create(SandboxSpec(image=IMAGE))
 
     await provider.exec(handle, "step 1")
-    assert "PauseActor" not in recorder.rpcs()
+    assert "pause" not in recorder.rpcs()
     await provider.exec(handle, "step 2")
     await asyncio.sleep(0.1)
 
     # Two back-to-back steps, one pause, after the idle delay.
-    assert recorder.rpcs().count("PauseActor") == 1
+    assert recorder.rpcs().count("pause") == 1
 
 
 async def test_exec_waits_for_a_pause_already_in_flight() -> None:
@@ -306,13 +316,13 @@ async def test_exec_waits_for_a_pause_already_in_flight() -> None:
     handle = await provider.create(SandboxSpec(image=IMAGE))
 
     await provider.exec(handle, "step 1")
-    await asyncio.sleep(0.02)  # the idle delay has elapsed; PauseActor is now in flight
+    await asyncio.sleep(0.02)  # the idle delay has elapsed; the pause is now in flight
     await provider.exec(handle, "step 2")
 
     # The second exec went out only after the pause completed, so the router
     # saw a SUSPENDED actor to resume, never a SUSPENDING one.
     execs = [i for i, event in enumerate(recorder.events) if event == ("http", "/exec")]
-    pause = recorder.events.index(("control", "PauseActor"))
+    pause = recorder.events.index(("control", "pause"))
     assert execs[0] < pause < execs[1]
 
 
@@ -432,12 +442,12 @@ async def test_eviction_clears_after_the_suspend_it_caused() -> None:
     handle = await provider.create(SandboxSpec(image=IMAGE))
 
     await provider.exec(handle, "true")
-    assert recorder.rpcs().count("SuspendActor") == 1 and not handle.raw.evicting
+    assert recorder.rpcs().count("suspend") == 1 and not handle.raw.evicting
 
     recorder._exec_body = {"stdout": "", "stderr": "", "exit_code": 0}
     await provider.exec(handle, "true")
     # Restored elsewhere with no new notice: the never policy applies again.
-    assert recorder.rpcs().count("SuspendActor") == 1
+    assert recorder.rpcs().count("suspend") == 1
 
 
 async def test_download_parks_the_actor_afterwards(tmp_path) -> None:
@@ -445,11 +455,11 @@ async def test_download_parks_the_actor_afterwards(tmp_path) -> None:
     provider = _make_provider(recorder, suspend_policy="pause_after_exec")
     handle = await provider.create(SandboxSpec(image=IMAGE))
 
-    pauses_after_create = recorder.rpcs().count("PauseActor")
+    pauses_after_create = recorder.rpcs().count("pause")
 
     await provider.download_file(handle, "/work/out.txt", tmp_path / "out.txt")
 
-    assert recorder.rpcs().count("PauseActor") == pauses_after_create + 1
+    assert recorder.rpcs().count("pause") == pauses_after_create + 1
 
 
 async def test_exec_retries_an_aborted_conflict_503(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -489,7 +499,7 @@ async def test_pause_waits_for_in_flight_requests() -> None:
     await exec_task
 
     execs = [i for i, event in enumerate(recorder.events) if event == ("http", "/exec")]
-    assert execs[0] < recorder.events.index(("control", "PauseActor"))
+    assert execs[0] < recorder.events.index(("control", "pause"))
 
 
 async def test_close_waits_for_a_pause_in_flight() -> None:
@@ -498,21 +508,21 @@ async def test_close_waits_for_a_pause_in_flight() -> None:
     handle = await provider.create(SandboxSpec(image=IMAGE))
 
     await provider.exec(handle, "step")
-    await asyncio.sleep(0.02)  # PauseActor is now in flight
+    await asyncio.sleep(0.02)  # the pause is now in flight
     await provider.close(handle)
 
-    assert recorder.events.index(("control", "PauseActor")) < recorder.events.index(("control", "DeleteActor"))
+    assert recorder.events.index(("control", "pause")) < recorder.events.index(("control", "DeleteActor"))
 
 
 async def test_eviction_notice_turns_the_next_idle_park_into_a_suspend() -> None:
     recorder = _Recorder(exec_body={"stdout": "", "stderr": "", "exit_code": 0, "evicting": True})
     provider = _make_provider(recorder, suspend_policy="pause_after_exec")
     handle = await provider.create(SandboxSpec(image=IMAGE))
-    pauses_after_create = recorder.rpcs().count("PauseActor")
+    pauses_after_create = recorder.rpcs().count("pause")
 
     await provider.exec(handle, "true")
 
-    assert "SuspendActor" in recorder.rpcs() and recorder.rpcs().count("PauseActor") == pauses_after_create
+    assert "suspend" in recorder.rpcs() and recorder.rpcs().count("pause") == pauses_after_create
 
 
 async def test_exec_retries_a_capacity_503_until_the_router_has_room() -> None:
@@ -548,7 +558,7 @@ async def test_pause_waits_for_parked_state_and_resume_probes_through_the_router
     await provider.pause(handle)
     await provider.resume(handle)
 
-    assert recorder.rpcs().count("PauseActor") == 1
+    assert recorder.rpcs().count("pause") == 1
     assert recorder.http_paths.count("/readyz") == probes_before + 1
 
 
@@ -558,15 +568,15 @@ async def test_control_retries_aborted(monkeypatch: pytest.MonkeyPatch) -> None:
     attempts = 0
 
     class _Stub:
-        async def PauseActor(self, request: Any, *, metadata: Any, timeout: Any) -> Any:  # noqa: N802
+        async def SuspendActor(self, request: Any, *, metadata: Any, timeout: Any) -> Any:  # noqa: N802
             nonlocal attempts
             attempts += 1
             if attempts < 3:
                 raise _grpc_error(grpc.StatusCode.ABORTED, "concurrent update conflict, please retry")
-            return ateapi_pb2.PauseActorResponse()
+            return ateapi_pb2.SuspendActorResponse()
 
     provider._stub = _Stub()
-    await provider._control("PauseActor", ateapi_pb2.PauseActorRequest())
+    await provider._control("SuspendActor", ateapi_pb2.SuspendActorRequest())
 
     assert attempts == 3
 
@@ -609,7 +619,7 @@ async def test_pause_outliving_its_deadline_waits_for_the_parked_state() -> None
     inner = recorder.control
 
     async def control(rpc: str, request: Any) -> Any:
-        if rpc == "PauseActor":
+        if rpc == "SuspendActor":
             # The server finishes the pause after the client's deadline passed.
             recorder.control_calls.append((rpc, request))
             recorder._parked = True
@@ -619,7 +629,7 @@ async def test_pause_outliving_its_deadline_waits_for_the_parked_state() -> None
     provider._control = control  # type: ignore[method-assign]
     await provider.pause(handle)
 
-    assert recorder.rpcs().count("PauseActor") == 1
+    assert recorder.rpcs().count("pause") == 1
     assert "GetActor" in recorder.rpcs()
 
 
@@ -632,7 +642,7 @@ async def test_close_deletes_in_any_state() -> None:
 
     deletes = [request for rpc, request in recorder.control_calls if rpc == "DeleteActor"]
     assert len(deletes) == 1 and deletes[0].any_state
-    assert "SuspendActor" not in recorder.rpcs()
+    assert "suspend" not in recorder.rpcs()
 
 
 def test_router_target_is_atespace_slash_actor() -> None:

@@ -45,7 +45,7 @@ image, which runs untouched, and sets it as the container command.
 
 **Substrate.** Any install of `main` at or past f03327bd runs the provider. Runs with more sandboxes than slots used these pull requests as well:
 
-- [agent-substrate/substrate#2558](https://github.com/agent-substrate/substrate/pull/2558): a lifecycle workflow runs to its end when the caller goes away. Without it a `PauseActor` that outruns the client deadline leaves the actor `SUSPENDING` for good.
+- [agent-substrate/substrate#2558](https://github.com/agent-substrate/substrate/pull/2558): a lifecycle workflow runs to its end when the caller goes away. Without it a `SuspendActor` that outruns the client deadline leaves the actor `SUSPENDING` for good.
 - [#2491](https://github.com/agent-substrate/substrate/pull/2491): a retried pause reuses the checkpoint image a cancelled attempt left instead of crashing the actor.
 - [#2559](https://github.com/agent-substrate/substrate/pull/2559): terminate deletes the sandbox root first. Under load `runsc delete` of the application container died at its budget and left actors `DELETING` with their slots held.
 - [#2492](https://github.com/agent-substrate/substrate/pull/2492): a slow first answer passes the wakeup probe. A restore wave onto a starved node crashed healthy actors otherwise.
@@ -449,7 +449,7 @@ sandbox:
 
 ### `suspend_policy`
 
-`pause_after_exec` calls `PauseActor` once the actor has been idle for
+`pause_after_exec` calls `SuspendActor` in its asynchronous mode (the snapshot stays on the node and uploads in the background; Substrate removed the `PauseActor` RPC that did the same) once the actor has been idle for
 `idle_before_suspend_s` after a step, and after `create()` has made it ready:
 the actor's worker is freed and its snapshot stays on the node, so the next
 step resumes without a download but has to land on the same node. A new
@@ -484,7 +484,7 @@ snapshot. Both operations pass through `SUSPENDING`.
 
 The provider implements `SupportsSandboxPauseResume`. `pause()` waits for
 requests in flight to finish (a pause would checkpoint a running command and
-cut its reply), calls `PauseActor` (or `SuspendActor` when the worker is being
+cut its reply), calls `SuspendActor` asynchronously (or synchronously when the worker is being
 evicted) and returns once the control plane reports the actor parked; it raises
 if requests are still in flight after `connection.grpc_timeout_s`. `resume()`
 sends a readiness probe through the router, which resumes the actor and parks

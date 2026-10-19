@@ -55,11 +55,6 @@ class ControlStub:
                 request_serializer=ateapi__pb2.SuspendActorRequest.SerializeToString,
                 response_deserializer=ateapi__pb2.SuspendActorResponse.FromString,
                 _registered_method=True)
-        self.PauseActor = channel.unary_unary(
-                '/ateapi.Control/PauseActor',
-                request_serializer=ateapi__pb2.PauseActorRequest.SerializeToString,
-                response_deserializer=ateapi__pb2.PauseActorResponse.FromString,
-                _registered_method=True)
         self.ResumeActor = channel.unary_unary(
                 '/ateapi.Control/ResumeActor',
                 request_serializer=ateapi__pb2.ResumeActorRequest.SerializeToString,
@@ -159,6 +154,16 @@ class ControlStub:
                 '/ateapi.Control/DrainWorker',
                 request_serializer=ateapi__pb2.DrainWorkerRequest.SerializeToString,
                 response_deserializer=ateapi__pb2.DrainWorkerResponse.FromString,
+                _registered_method=True)
+        self.MarkWorkerAvailable = channel.unary_unary(
+                '/ateapi.Control/MarkWorkerAvailable',
+                request_serializer=ateapi__pb2.MarkWorkerAvailableRequest.SerializeToString,
+                response_deserializer=ateapi__pb2.MarkWorkerAvailableResponse.FromString,
+                _registered_method=True)
+        self.MarkWorkerUnavailable = channel.unary_unary(
+                '/ateapi.Control/MarkWorkerUnavailable',
+                request_serializer=ateapi__pb2.MarkWorkerUnavailableRequest.SerializeToString,
+                response_deserializer=ateapi__pb2.MarkWorkerUnavailableResponse.FromString,
                 _registered_method=True)
         self.ListWorkerActorAssignments = channel.unary_unary(
                 '/ateapi.Control/ListWorkerActorAssignments',
@@ -274,17 +279,7 @@ class ControlServicer:
 
     def SuspendActor(self, request, context):
         """Suspend a given actor to a new snapshot. A running actor is checkpointed
-        on its worker; a paused actor's node-local snapshot is uploaded, narrowed
-        to the template's commit scope where required (Full capture, Data commit).
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def PauseActor(self, request, context):
-        """Pause a given actor: checkpoint it to its worker's node and leave it
-        SUSPENDED with that node-local snapshot, pinned to the node. A paused
-        actor is told from a suspended one by its snapshots, not its state.
+        on its worker. A SUSPENDED actor is returned as it is.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -299,7 +294,9 @@ class ControlServicer:
 
     def RevertActor(self, request, context):
         """Revert an actor to SUSPENDED state at its durable snapshot.
-        Only crashed, running or paused actors can be reverted.
+        Only crashed or running actors, or suspended actors with a node-local
+        snapshot, can be reverted. A suspended actor without a node-local snapshot
+        is already at its durable snapshot, so there is nothing to revert.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -365,7 +362,8 @@ class ControlServicer:
     def CreateTag(self, request, context):
         """Tag the external snapshot a suspended Actor holds. The tag gets its own
         copy of that snapshot, so suspending or deleting the Actor afterwards
-        cannot collect it.
+        cannot collect it. When the Actor's latest snapshot is not uploaded yet,
+        atelet uploads it first, so the call can take as long as that upload.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -416,7 +414,8 @@ class ControlServicer:
         raise NotImplementedError('Method not implemented!')
 
     def CreateWorker(self, request, context):
-        """Register a Worker. Called once its Pod is Ready and has an IP.
+        """Register a Worker. Called once its Pod has an IP. A Worker is registered
+        UNAVAILABLE and takes no Actors until MarkWorkerAvailable.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -441,6 +440,28 @@ class ControlServicer:
         """Mark a Worker as terminating so the scheduler stops routing new Actors to
         it. Idempotent; one-way. Deliberately leaves any bound Actor alone.
         Returns ABORTED if another write lands on the Worker first; retry.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def MarkWorkerAvailable(self, request, context):
+        """Mark an UNAVAILABLE Worker ACTIVE so the scheduler places Actors on it.
+        Idempotent. Returns FAILED_PRECONDITION for a DRAINING Worker, and ABORTED
+        if another write lands on the Worker first; retry.
+
+        Every Actor placed after this call is stamped with the Worker's epoch as
+        it stands then, so a caller raises epoch for a restarted the worker first.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def MarkWorkerUnavailable(self, request, context):
+        """Mark an ACTIVE Worker UNAVAILABLE so the scheduler stops placing Actors on
+        it, as while its Pod is not Ready. Idempotent. Leaves any bound Actor
+        alone. Returns FAILED_PRECONDITION for a DRAINING Worker, and ABORTED if
+        another write lands on the Worker first; retry.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -509,7 +530,7 @@ class ControlServicer:
 
     def DeleteActorTemplate(self, request, context):
         """Delete an ActorTemplate together with its golden actor and golden
-        tag in the reserved ate-golden atespace.
+        tag in the template's atespace.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -591,11 +612,6 @@ def add_ControlServicer_to_server(servicer, server):
                     servicer.SuspendActor,
                     request_deserializer=ateapi__pb2.SuspendActorRequest.FromString,
                     response_serializer=ateapi__pb2.SuspendActorResponse.SerializeToString,
-            ),
-            'PauseActor': grpc.unary_unary_rpc_method_handler(
-                    servicer.PauseActor,
-                    request_deserializer=ateapi__pb2.PauseActorRequest.FromString,
-                    response_serializer=ateapi__pb2.PauseActorResponse.SerializeToString,
             ),
             'ResumeActor': grpc.unary_unary_rpc_method_handler(
                     servicer.ResumeActor,
@@ -696,6 +712,16 @@ def add_ControlServicer_to_server(servicer, server):
                     servicer.DrainWorker,
                     request_deserializer=ateapi__pb2.DrainWorkerRequest.FromString,
                     response_serializer=ateapi__pb2.DrainWorkerResponse.SerializeToString,
+            ),
+            'MarkWorkerAvailable': grpc.unary_unary_rpc_method_handler(
+                    servicer.MarkWorkerAvailable,
+                    request_deserializer=ateapi__pb2.MarkWorkerAvailableRequest.FromString,
+                    response_serializer=ateapi__pb2.MarkWorkerAvailableResponse.SerializeToString,
+            ),
+            'MarkWorkerUnavailable': grpc.unary_unary_rpc_method_handler(
+                    servicer.MarkWorkerUnavailable,
+                    request_deserializer=ateapi__pb2.MarkWorkerUnavailableRequest.FromString,
+                    response_serializer=ateapi__pb2.MarkWorkerUnavailableResponse.SerializeToString,
             ),
             'ListWorkerActorAssignments': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkerActorAssignments,
@@ -892,33 +918,6 @@ class Control:
             '/ateapi.Control/SuspendActor',
             ateapi__pb2.SuspendActorRequest.SerializeToString,
             ateapi__pb2.SuspendActorResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def PauseActor(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/ateapi.Control/PauseActor',
-            ateapi__pb2.PauseActorRequest.SerializeToString,
-            ateapi__pb2.PauseActorResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1470,6 +1469,60 @@ class Control:
             _registered_method=True)
 
     @staticmethod
+    def MarkWorkerAvailable(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateapi.Control/MarkWorkerAvailable',
+            ateapi__pb2.MarkWorkerAvailableRequest.SerializeToString,
+            ateapi__pb2.MarkWorkerAvailableResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def MarkWorkerUnavailable(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateapi.Control/MarkWorkerUnavailable',
+            ateapi__pb2.MarkWorkerUnavailableRequest.SerializeToString,
+            ateapi__pb2.MarkWorkerUnavailableResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def ListWorkerActorAssignments(request,
             target,
             options=(),
@@ -1947,10 +2000,15 @@ class WorkerServiceStub:
                 request_serializer=ateapi__pb2.RegisterWorkerRequest.SerializeToString,
                 response_deserializer=ateapi__pb2.RegisterWorkerResponse.FromString,
                 _registered_method=True)
-        self.MintAteomActorCertificate = channel.unary_unary(
-                '/ateapi.WorkerService/MintAteomActorCertificate',
-                request_serializer=ateapi__pb2.MintAteomActorCertificateRequest.SerializeToString,
-                response_deserializer=ateapi__pb2.MintAteomActorCertificateResponse.FromString,
+        self.MintWorkerActorCertificate = channel.unary_unary(
+                '/ateapi.WorkerService/MintWorkerActorCertificate',
+                request_serializer=ateapi__pb2.MintWorkerActorCertificateRequest.SerializeToString,
+                response_deserializer=ateapi__pb2.MintWorkerActorCertificateResponse.FromString,
+                _registered_method=True)
+        self.MintWorkerActorJwt = channel.unary_unary(
+                '/ateapi.WorkerService/MintWorkerActorJwt',
+                request_serializer=ateapi__pb2.MintWorkerActorJwtRequest.SerializeToString,
+                response_deserializer=ateapi__pb2.MintWorkerActorJwtResponse.FromString,
                 _registered_method=True)
         self.RequestActorSuspend = channel.unary_unary(
                 '/ateapi.WorkerService/RequestActorSuspend',
@@ -1987,11 +2045,35 @@ class WorkerServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def MintAteomActorCertificate(self, request, context):
-        """Create a Substrate-issued SPIFFE certificate that asserts an ateom acting
+    def MintWorkerActorCertificate(self, request, context):
+        """Create a Substrate-issued SPIFFE certificate that asserts a worker acting
         on behalf of a particular actor.
 
-        SPIFFE URI: spiffe://${trustdomain}/ateom-for-actor/${atespace}/${actor}
+        SPIFFE URI: spiffe://${trustdomain}/worker-for-actor/${atespace}/${actor}
+
+        atelet calls this with its own client certificate, as it does for
+        RequestActorSuspend, naming the Worker its caller proved itself to be.
+        The control plane mints only for the Worker that the Actor is assigned
+        to, and only to an atelet on that Worker's node. A request from any
+        other node or Worker gets NotFound; one from the assigned Worker with a
+        stale actor_uid gets Aborted. Unlike MintWorkerActorJwt, a paused Actor
+        gets NotFound, since it has no Worker to bind the certificate to.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def MintWorkerActorJwt(self, request, context):
+        """MintWorkerActorJwt creates a Substrate-issued JWT that asserts a worker
+        acting on behalf of a particular actor: the JWT counterpart of
+        MintWorkerActorCertificate. atelet calls it with its own client
+        certificate and hands the JWT to node-side plugins, which exchange it for
+        credentials scoped to that actor.
+
+        The token speaks for the worker, not the actor: its subject is
+        `worker-for-actor/<atespace>/<name>` and its claims sit under
+        `worker-for-actor.ate.dev`, see MintWorkerActorJwtResponse. The lifetime is
+        fixed at one hour.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2023,18 +2105,16 @@ class WorkerServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ReportActorSnapshotState(self, request, context):
-        """ReportActorSnapshotState records which snapshots of an Actor the calling
-        atelet holds on its node, and which of them are durable. Only atelet can
-        observe when an upload finishes or a local copy is deleted, and the
-        control plane needs both to decide where the Actor can resume.
+        """ReportActorSnapshotState reports an Actor's snapshot state on the caller's
+        node. The control plane records two facts from it: an upload finished, and
+        atelet detached the Actor from the node. Only atelet observes either.
 
-        Only atelet should call this, with its own client certificate. The
-        control plane serves it only for an Actor on the caller's node.
-        Idempotent: each report carries the whole state and replaces the previous
-        one. Returns ABORTED while another operation holds the Actor; retry.
-
-        TODO(#2570): not served yet. Every call returns UNIMPLEMENTED until the
-        handler lands.
+        atelet calls this with its own client certificate, for an Actor on its
+        node. Each report carries the whole state, so repeating one is safe.
+        Returns ABORTED while another operation is changing the Actor; retry.
+        Returns NOT_FOUND once the Actor is gone or no longer on the caller's
+        node. Returns FAILED_PRECONDITION or INVALID_ARGUMENT when the report
+        conflicts with the record; don't retry.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2048,10 +2128,15 @@ def add_WorkerServiceServicer_to_server(servicer, server):
                     request_deserializer=ateapi__pb2.RegisterWorkerRequest.FromString,
                     response_serializer=ateapi__pb2.RegisterWorkerResponse.SerializeToString,
             ),
-            'MintAteomActorCertificate': grpc.unary_unary_rpc_method_handler(
-                    servicer.MintAteomActorCertificate,
-                    request_deserializer=ateapi__pb2.MintAteomActorCertificateRequest.FromString,
-                    response_serializer=ateapi__pb2.MintAteomActorCertificateResponse.SerializeToString,
+            'MintWorkerActorCertificate': grpc.unary_unary_rpc_method_handler(
+                    servicer.MintWorkerActorCertificate,
+                    request_deserializer=ateapi__pb2.MintWorkerActorCertificateRequest.FromString,
+                    response_serializer=ateapi__pb2.MintWorkerActorCertificateResponse.SerializeToString,
+            ),
+            'MintWorkerActorJwt': grpc.unary_unary_rpc_method_handler(
+                    servicer.MintWorkerActorJwt,
+                    request_deserializer=ateapi__pb2.MintWorkerActorJwtRequest.FromString,
+                    response_serializer=ateapi__pb2.MintWorkerActorJwtResponse.SerializeToString,
             ),
             'RequestActorSuspend': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestActorSuspend,
@@ -2106,7 +2191,7 @@ class WorkerService:
             _registered_method=True)
 
     @staticmethod
-    def MintAteomActorCertificate(request,
+    def MintWorkerActorCertificate(request,
             target,
             options=(),
             channel_credentials=None,
@@ -2119,9 +2204,36 @@ class WorkerService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/ateapi.WorkerService/MintAteomActorCertificate',
-            ateapi__pb2.MintAteomActorCertificateRequest.SerializeToString,
-            ateapi__pb2.MintAteomActorCertificateResponse.FromString,
+            '/ateapi.WorkerService/MintWorkerActorCertificate',
+            ateapi__pb2.MintWorkerActorCertificateRequest.SerializeToString,
+            ateapi__pb2.MintWorkerActorCertificateResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def MintWorkerActorJwt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateapi.WorkerService/MintWorkerActorJwt',
+            ateapi__pb2.MintWorkerActorJwtRequest.SerializeToString,
+            ateapi__pb2.MintWorkerActorJwtResponse.FromString,
             options,
             channel_credentials,
             insecure,

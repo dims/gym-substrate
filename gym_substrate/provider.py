@@ -104,6 +104,17 @@ _PARKED_STATES = {
     ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDED,
 }
 
+# How an actor is parked. Both are SuspendActor calls (Substrate removed PauseActor): a
+# pause is the asynchronous mode, which returns once the snapshot is on the node and
+# uploads it in the background, so the next resume lands on that node; a suspend is the
+# synchronous mode, durable before the call returns, so the worker and the node can go.
+_PARK_PAUSE = "pause"
+_PARK_SUSPEND = "suspend"
+_PARK_MODES = {
+    _PARK_PAUSE: ateapi_pb2.DurabilityMode.DURABILITY_MODE_ASYNCHRONOUS,
+    _PARK_SUSPEND: ateapi_pb2.DurabilityMode.DURABILITY_MODE_SYNCHRONOUS,
+}
+
 _TRANSITIONAL_STATES = {
     ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDING,
 }
@@ -249,10 +260,12 @@ class SubstrateCreateConfig:
     ready_queue_timeout_s: float = 3600.0
 
     # never: leave the actor running between calls.
-    # after_exec: SuspendActor once the actor goes idle. The snapshot goes to
-    #   object storage and the worker is freed.
-    # pause_after_exec: PauseActor instead. The snapshot stays on the node, so
-    #   the next resume skips the download but has to land on the same node.
+    # after_exec: a synchronous SuspendActor once the actor goes idle. The
+    #   snapshot is in object storage when the call returns and the worker is freed.
+    # pause_after_exec: an asynchronous SuspendActor instead (what Substrate's
+    #   PauseActor did). The snapshot stays on the node and uploads in the
+    #   background, so the next resume skips the download but has to land on
+    #   the same node.
     # Either way the next exec goes through the router, which resumes the
     # actor before routing, so nothing has to resume it explicitly. Parking
     # happens after create() and after every exec, upload and download.
@@ -857,17 +870,17 @@ class SubstrateProvider:
         policy = self._create_config.suspend_policy
         if actor.evicting:
             # The node is going away: a node-local pause would go with it.
-            rpc = "SuspendActor"
+            kind = _PARK_SUSPEND
         elif policy == "never":
             return
         else:
-            rpc = "SuspendActor" if policy == "after_exec" else "PauseActor"
+            kind = _PARK_SUSPEND if policy == "after_exec" else _PARK_PAUSE
         delay = self._create_config.idle_before_suspend_s
         self._cancel_pending_suspend(actor)
-        # Always a task, shielded from the caller: a PauseActor RPC that is
-        # cancelled client-side leaves the actor stranded mid-transition on
-        # the server, with nothing to finish it.
-        task = asyncio.create_task(self._suspend_after(actor, rpc, delay))
+        # Always a task, shielded from the caller: a park RPC that is cancelled
+        # client-side leaves the actor stranded mid-transition on the server,
+        # with nothing to finish it.
+        task = asyncio.create_task(self._suspend_after(actor, kind, delay))
         actor.suspend_task = task
         self._suspend_tasks.add(task)
         task.add_done_callback(self._suspend_tasks.discard)
@@ -879,7 +892,7 @@ class SubstrateProvider:
                     return  # a newer request superseded the park; the result stands
                 raise
 
-    async def _suspend_after(self, actor: _SubstrateActor, rpc: str, delay: float) -> None:
+    async def _suspend_after(self, actor: _SubstrateActor, kind: str, delay: float) -> None:
         try:
             if delay > 0:
                 await asyncio.sleep(delay)
@@ -887,49 +900,48 @@ class SubstrateProvider:
             return
         actor.parking += 1
         try:
-            await self._suspend_if_idle(actor, rpc)
+            await self._suspend_if_idle(actor, kind)
         except Exception as e:  # noqa: BLE001 - a background task must not die silently
-            LOGGER.warning("substrate: idle %s of %s failed: %s", rpc, actor.name, e)
+            LOGGER.warning("substrate: idle %s of %s failed: %s", kind, actor.name, e)
         finally:
             actor.parking -= 1
 
-    async def _suspend_if_idle(self, actor: _SubstrateActor, rpc: str) -> None:
+    async def _suspend_if_idle(self, actor: _SubstrateActor, kind: str) -> None:
         async with actor.lock:
             if actor.inflight or actor.parked:
                 return
             try:
-                state = await self._park(actor, rpc)
+                state = await self._park(actor, kind)
             except grpc.aio.AioRpcError as e:
                 # A failed suspend costs density, not correctness: the actor
                 # stays running and the next exec still works.
-                LOGGER.warning("substrate: %s on %s failed: %s", rpc, actor.name, e.details())
+                LOGGER.warning("substrate: %s on %s failed: %s", kind, actor.name, e.details())
                 return
             actor.parked = state in _PARKED_STATES
-            if actor.parked and rpc == "SuspendActor":
+            if actor.parked and kind == _PARK_SUSPEND:
                 actor.evicting = False  # the snapshot is in storage; the node can go
         if state not in _PARKED_STATES:
             LOGGER.warning(
-                "substrate: %s on %s did not park it: %s", rpc, actor.name, ateapi_pb2.ActorState.Name(state)
+                "substrate: %s on %s did not park it: %s", kind, actor.name, ateapi_pb2.ActorState.Name(state)
             )
 
-    async def _park(self, actor: _SubstrateActor, rpc: str) -> int:
+    async def _park(self, actor: _SubstrateActor, kind: str) -> int:
         """Pause or suspend the actor and wait out the transition.
 
         Returns the state the actor settled in. The caller holds actor.lock.
         """
-        if rpc == "PauseActor":
-            request: Any = ateapi_pb2.PauseActorRequest(actor=actor.object_ref)
-        else:
-            request = ateapi_pb2.SuspendActorRequest(actor=actor.object_ref)
+        request = ateapi_pb2.SuspendActorRequest(
+            actor=actor.object_ref, options=ateapi_pb2.SuspendOptions(mode=_PARK_MODES[kind])
+        )
         settle_s = _PARK_SETTLE_BUDGET_S
         try:
-            await self._control(rpc, request)
+            await self._control("SuspendActor", request)
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
                 # The checkpoint queued behind others on a loaded node and
                 # outran the client deadline; ateapi keeps working on it, so
                 # wait for the state instead of failing the park.
-                LOGGER.warning("substrate: %s on %s outran its deadline; waiting for the state", rpc, actor.name)
+                LOGGER.warning("substrate: %s on %s outran its deadline; waiting for the state", kind, actor.name)
                 settle_s = self._connection.grpc_timeout_s
             elif e.code() != grpc.StatusCode.FAILED_PRECONDITION:
                 # FAILED_PRECONDITION: already parked, by a previous call or by the platform.
@@ -944,7 +956,7 @@ class SubstrateProvider:
                 if state not in _PARKED_STATES:
                     LOGGER.warning(
                         "substrate: %s on %s left it %s after %.0f s; the next park retries",
-                        rpc,
+                        kind,
                         actor.name,
                         ateapi_pb2.ActorState.Name(state),
                         settle_s,
@@ -963,13 +975,13 @@ class SubstrateProvider:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._connection.grpc_timeout_s
         # A worker that is going away cannot keep a node-local snapshot.
-        rpc = "SuspendActor" if actor.evicting else "PauseActor"
+        kind = _PARK_SUSPEND if actor.evicting else _PARK_PAUSE
         while True:
             async with actor.lock:
                 if not actor.inflight:
-                    state = await self._park(actor, rpc)
+                    state = await self._park(actor, kind)
                     actor.parked = state in _PARKED_STATES
-                    if actor.parked and rpc == "SuspendActor":
+                    if actor.parked and kind == _PARK_SUSPEND:
                         actor.evicting = False
                     break
             if loop.time() >= deadline:
@@ -1035,7 +1047,7 @@ class SubstrateProvider:
             if not self._create_config.delete_on_close:
                 # Keep the sandbox for inspection, but not its worker.
                 try:
-                    await self._park(actor, "SuspendActor")
+                    await self._park(actor, _PARK_SUSPEND)
                 except grpc.aio.AioRpcError as e:
                     if e.code() != grpc.StatusCode.NOT_FOUND:
                         LOGGER.warning("substrate: suspending %s on close: %s", actor.name, e.details())
