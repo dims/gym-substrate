@@ -1,0 +1,20 @@
+2026-10-19T01:53:06Z ladder: start s2-16-never (run_arm /root/gym-substrate-run/run/substrate-never-sat.yaml n=16 think=2 box=0)
+2026-10-19T01:55:35Z ladder: end s2-16-never rc=0 (124 = time box)
+s2-16-never policy=suspend_policy: never n=16 wall=78s eval_exit=0 leaked_actors=0 start=2026-10-19T01:54:12Z end=2026-10-19T01:55:30Z
+Per-task latency over 16 finished attempt(s): median 1.1 min, p90 1.2 min, p99 1.2 min, max 1.2 min
+    "mean/reward": 1.0,
+    "eval_error_rate": 0.0,
+rollouts=16 reward_mean=1.00 errored=0
+prom dump s2-16-never: 4751 series
+[01:55:35] after-s2-16-never: actors  | workers active 2 | restarts 1 |  busy=3% mem_used=16G disk_w=0.5MB/s load=10.01,4.07,1.93
+2026-10-19T03:06:03Z ladder: start s1b4x; slots 16; api 172.18.0.2:30443; restarts baseline 1
+2026-10-19T03:06:03Z ladder: start s1b-64-never: image localhost:5001/burn-xs:3.12-slim, 2 x 2 sandboxes, stagger 0.20, steps/gap/policy/burn/alloc 15 0 never 20 0.55
+cleanup: 0 actors left after 5 s
+2026-10-19T03:19:10Z ladder: end s1b-64-never rc=0
+shard 1: policy=never sandboxes=2 steps=15 gap=0s burn=20s alloc=0.55GiB wall=785.3s created=2 closed=2 errors=0 step_failed=0 rc_failed=0 holder_lost=0 holder={'alive': 30} states_after_last_step={'RUNNING': 2} rows=/root/gym-substrate-run/run
+shard 1: RESULT PASS
+shard 2: policy=never sandboxes=2 steps=15 gap=0s burn=20s alloc=0.55GiB wall=785.0s created=2 closed=2 errors=0 step_failed=0 rc_failed=0 holder_lost=0 holder={'alive': 30} states_after_last_step={'RUNNING': 2} rows=/root/gym-substrate-run/run
+shard 2: RESULT PASS
+[03:19:10] after-s1b-64-never: actors  | workers active 2 | restarts 1 |  busy=12% mem_used=16G disk_w=0.5MB/s load=6.88,16.24,12.75
+cleanup: 0 actors left after 5 s
+2026-10-19T03:19:11Z ladder: done (s1b4x); outputs in /root/gym-substrate-run/run/ladder; failed=0

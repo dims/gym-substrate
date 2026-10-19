@@ -1,0 +1,14 @@
+[
+ {
+  "key_metrics": {
+   "pass@1/accuracy": 100.0,
+   "pass@1[avg-of-1]/accuracy": 100.0,
+   "mean/reward": 1.0,
+   "resolved_task_count": 1,
+   "task_count": 1,
+   "resolved_task_rate": 100.0,
+   "eval_error_rate": 0.0,
+   "tests_status_rate": 100.0
+  }
+ }
+]

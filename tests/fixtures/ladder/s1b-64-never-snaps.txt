@@ -1,0 +1,4 @@
+[03:06:04] during-s1b-64-never: actors  | workers active 2 | restarts 1 |  busy=3% mem_used=11G disk_w=0.3MB/s load=0.73,3.20,3.62
+[03:06:34] during-s1b-64-never: actors  64 RUNNING  | workers active 2 | restarts 1 |  busy=64% mem_used=18G disk_w=0.8MB/s load=9.40,4.96,4.19
+[03:18:12] during-s1b-64-never: actors  2 DELETING 31 RUNNING  | workers active 2 | restarts 1 |  busy=45% mem_used=33G disk_w=0.3MB/s load=12.68,18.97,13.33
+[03:18:42] during-s1b-64-never: actors  23 RUNNING  | workers active 2 | restarts 1 |  busy=33% mem_used=27G disk_w=0.4MB/s load=9.83,17.68,13.08
