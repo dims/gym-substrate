@@ -52,7 +52,9 @@ def is_parked(actor, policy: str) -> bool:
     if latest is None:
         return False
     if policy == "pause_after_exec":
-        return bool(latest.locality) and not latest.HasField("durable_snapshot")
+        # A pause keeps the checkpoint on the node (locality) and records the durable copy as
+        # PENDING while atelet uploads it in the background; a suspend waits for COMPLETED.
+        return bool(latest.locality)
     return (
         latest.HasField("durable_snapshot")
         and latest.durable_snapshot.status == ateapi_pb2.SNAPSHOT_STORAGE_STATUS_COMPLETED
