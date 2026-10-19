@@ -119,7 +119,8 @@ if [ -n "${WAIT_GOLDEN:-}" ] && [ "${#names[@]}" -gt 0 ]; then
   while :; do
     ready=0
     for n in "${names[@]}"; do
-      [ -n "$(kubectl ate get actor-template "${n}" -a "${ATESPACE}" 2>/dev/null | awk 'NR>1 && $4 ~ /^[0-9a-f]{8}-/')" ] && ready=$((ready + 1))
+      # The golden tag is a UUID in whichever column the listing puts it (the sandbox-class column went away with Substrate #2780).
+      [ -n "$(kubectl ate get actor-template "${n}" -a "${ATESPACE}" 2>/dev/null | awk 'NR>1 && / [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}( |$)/')" ] && ready=$((ready + 1))
     done
     if [ "${ready}" -eq "${#names[@]}" ]; then echo "all templates have a golden (${ready})"; break; fi
     if [ "${SECONDS}" -ge "${deadline}" ]; then
