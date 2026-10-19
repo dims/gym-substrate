@@ -30,7 +30,7 @@ else
 fi
 if [ "$RUNTIME" = microvm ]; then
   if docker run --rm --device /dev/kvm alpine true >/dev/null 2>&1; then pass "kvm: docker can use /dev/kvm"; else failed "kvm: docker cannot use /dev/kvm (RUNTIME=microvm needs it: a KVM host and a readable device)"; fi
-  echo "info kernel.pid_max $(sysctl -n kernel.pid_max), kernel.threads-max $(sysctl -n kernel.threads-max), vm.max_map_count $(sysctl -n vm.max_map_count), fs.file-max $(sysctl -n fs.file-max), thp $(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null | tr -d '\n') shmem $(cat /sys/kernel/mm/transparent_hugepage/shmem_enabled 2>/dev/null | tr -d '\n')"
+  echo "info kernel.pid_max $(sysctl -n kernel.pid_max), kernel.threads-max $(sysctl -n kernel.threads-max), vm.max_map_count $(sysctl -n vm.max_map_count), fs.file-max $(sysctl -n fs.file-max), thp $(tr -d '\n' < /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null) shmem $(tr -d '\n' < /sys/kernel/mm/transparent_hugepage/shmem_enabled 2>/dev/null)"
 fi
 inst=$(sysctl -n fs.inotify.max_user_instances); watches=$(sysctl -n fs.inotify.max_user_watches)
 if [ "$inst" -ge 8192 ]; then pass "fs.inotify.max_user_instances $inst"; else failed "fs.inotify.max_user_instances $inst (< 8192; the default 128 breaks fleets above about 64 sandboxes)"; fi
