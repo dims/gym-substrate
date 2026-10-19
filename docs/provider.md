@@ -43,7 +43,7 @@ image, which runs untouched, and sets it as the container command.
 - [#4471](https://github.com/NVIDIA-NeMo/Gym/pull/4471): the per-instance sandbox config is replaced atomically. Concurrent rollouts tore it.
 - [#4551](https://github.com/NVIDIA-NeMo/Gym/pull/4551): a distribution that publishes a `nemo_gym.sandbox_providers` entry point is installed into every server venv through `head_server_deps`. Without it, install the plugin into the agent server's venv by hand (see Run).
 
-**Substrate.** Any install of `main` at or past f03327bd runs the provider. Runs with more sandboxes than slots used these pull requests as well:
+**Substrate.** Any install of `main` at or past b5b348183 (2026-10-18) runs the provider: it parks an actor with `SuspendActor` in the asynchronous mode (the snapshot stays on the node and uploads in the background), which Substrate added in #2805 and made the only form when #2813 removed `PauseActor`. Runs with more sandboxes than slots used these pull requests as well:
 
 - [agent-substrate/substrate#2558](https://github.com/agent-substrate/substrate/pull/2558): a lifecycle workflow runs to its end when the caller goes away. Without it a `SuspendActor` that outruns the client deadline leaves the actor `SUSPENDING` for good.
 - [#2491](https://github.com/agent-substrate/substrate/pull/2491): a retried pause reuses the checkpoint image a cancelled attempt left instead of crashing the actor.
@@ -146,12 +146,10 @@ other pods remain subject to Substrate's policies. TLS and token authentication 
 kubelet, containerd and every sandbox; 65536 held at 3072 sandboxes) and
 `fs.inotify.max_user_watches`; `net.ipv4.neigh.default.gc_thresh1`, `gc_thresh2` and
 `gc_thresh3` (the default ceiling of 1024 is global across network namespaces and
-overflows above about 1000 sandbox addresses;
-[#2497](https://github.com/agent-substrate/substrate/pull/2497) warns when it is at the
+overflows above about 1000 sandbox addresses; the kind script warns when it is at the
 default); `fs.aio-max-nr`; `nofile` 1048576 for the container runtime. Above a few
-hundred sandboxes per node, reserve CPU for the kubelet
-([#2495](https://github.com/agent-substrate/substrate/pull/2495) on kind), or the node
-flaps NotReady and the taint manager evicts its workers.
+hundred sandboxes per node, reserve CPU for the kubelet (`ATE_KIND_RESERVED_CPU` on
+kind), or the node flaps NotReady and the taint manager evicts its workers.
 
 **arm64 and 64 KiB pages.** gVisor does not emulate, so an image must match the node
 architecture or the actor fails at `runsc start`; map image names with
@@ -368,7 +366,11 @@ unset, a missing arm64 task image is built from the pinned commit of
 archives are reused; an explicitly supplied directory disables the build fallback.
 Only tasks with a `Dockerfile.arm64` in that commit can be built this way;
 `POST_KIND_HOOK`, a script run once the cluster exists, for a host whose firewall drops
-forwarded traffic until the kind bridge is allowed.
+forwarded traffic until the kind bridge is allowed. `hack/gym-checkout.sh` writes
+`WORK/run/constraints.txt` and `scripts/run_arm.sh` exports it as `UV_CONSTRAINT`, so the
+venvs the Gym servers build from their `requirements.txt` take the pins in it (today
+`litellm<1.106`: 1.106.0 needs mcp 2, which nemo-gym excludes); the head venv follows Gym's
+lock. Delete a server's `.venv` after changing the pins.
 
 Measured on 32-vCPU hosts: about 20 min cold on an amd64 host that had only the tools
 installed (kind 24 s, the Substrate install 4 min, templates 1 min, Gym checkout and venv
