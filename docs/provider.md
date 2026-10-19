@@ -341,7 +341,9 @@ hack/host-check.sh
 hack/rerun-all.sh --wipe
 ```
 
-Environment: `SUBSTRATE_REF` (default `upstream/main`); `GYM_REF` and `GYM_BRANCHES` (the
+Environment: `SUBSTRATE_REPO` (the clone source, default the upstream repository) and
+`SUBSTRATE_REF` (default `upstream/main`; the remote is named `upstream` whatever the repository, so
+a fork's branch is `upstream/<branch>`); `GYM_REF` and `GYM_BRANCHES` (the
 dims/Nemo-Gym branches merged on top; default the four pull requests under Requirements);
 `GYM_SUBSTRATE_SOURCE` (a git URL or a directory; default this repository's main);
 `GATE_INSTANCE` (default `scikit-learn__scikit-learn-14141`, the one recorded rollout in Gym's

@@ -7,8 +7,9 @@
 # the router settings, NodePorts, the demo pools and the gym WorkerPools. Steps that are
 # already done are skipped.
 #   hack/kind-up.sh
-# Environment: WORK, SUBSTRATE_DIR (default WORK/substrate), SUBSTRATE_REF (default
-# upstream/main), RUNTIME (gvisor or microvm), GVISOR_ASSET_DIR (required on a 64 KiB-page
+# Environment: WORK, SUBSTRATE_DIR (default WORK/substrate), SUBSTRATE_REPO (the clone source,
+# default the upstream repository; a fork for a branch under test) and SUBSTRATE_REF (default
+# upstream/main; the remote is named upstream whatever SUBSTRATE_REPO is), RUNTIME (gvisor or microvm), GVISOR_ASSET_DIR (required on a 64 KiB-page
 # kernel with gvisor), MICROVM_ASSET_DIR (a set made by Substrate's
 # hack/microvm-assets/assemble.sh; downloaded when unset), POST_KIND_HOOK (a script run once
 # the cluster exists, for a host firewall), POOL_REPLICAS / POOL_CPU / POOL_MEMORY (default
@@ -17,11 +18,12 @@ set -uo pipefail
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/_lib.sh"
 SUBSTRATE_DIR="${SUBSTRATE_DIR:-$WORK/substrate}"; SUBSTRATE_REF="${SUBSTRATE_REF:-upstream/main}"
+SUBSTRATE_REPO="${SUBSTRATE_REPO:-https://github.com/agent-substrate/substrate.git}"
 POOL_REPLICAS="${POOL_REPLICAS:-3}"; POOL_CPU="${POOL_CPU:-6}"; POOL_MEMORY="${POOL_MEMORY:-12Gi}"
 
 step "substrate at $SUBSTRATE_REF"
 if [ ! -d "$SUBSTRATE_DIR/.git" ]; then
-  git clone -q https://github.com/agent-substrate/substrate.git "$SUBSTRATE_DIR" || fail CLONE
+  git clone -q "$SUBSTRATE_REPO" "$SUBSTRATE_DIR" || fail CLONE
   git -C "$SUBSTRATE_DIR" remote rename origin upstream
 fi
 git -C "$SUBSTRATE_DIR" fetch -q upstream || fail FETCH
