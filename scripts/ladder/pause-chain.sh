@@ -6,8 +6,8 @@
 # delete the actors of the named template. One process snapshot, one kill: parents and children
 # together, so no parent starts a new stage after its child dies. Use it at a stage boundary.
 #   scripts/ladder/pause-chain.sh [TEMPLATE_NAME_TO_DELETE]
-set -u
 # shellcheck disable=SC2009  # ps + a bracketed grep on purpose: pgrep -f would match this script's own command line
+set -u
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/../../hack/_lib.sh"
 TPL=${1:-}; EV="$RUN_DIR/events.log"; echo "$(date -u +%FT%TZ) pause-chain: start" | tee -a "$EV"
