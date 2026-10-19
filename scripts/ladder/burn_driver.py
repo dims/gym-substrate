@@ -171,7 +171,9 @@ async def main() -> int:
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, dump_tasks)
     # One RPC before the herd: the channel connects on it, so the N creates
     # that follow start on a READY channel.
-    await provider._control("ListActors", ateapi_pb2.ListActorsRequest(atespace=ATESPACE, page_size=1))
+    await provider._control(
+        "ListActors", ateapi_pb2.ListActorsRequest(atespace=ATESPACE, options=ateapi_pb2.ListOptions(page_size=1))
+    )
     global WALL0
     WALL0 = wall0 = time.monotonic()
     results = await asyncio.gather(*(one_sandbox(provider, i, rows) for i in range(N)), return_exceptions=True)

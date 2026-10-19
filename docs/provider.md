@@ -383,6 +383,27 @@ the whole pass takes 29 min (`from-zero.yml`), the Substrate install 7 min of it
 The pass leaves the Gym servers and the replay policy running, so `scripts/run_arm.sh` can
 follow with a comparison.
 
+### A borrowed host
+
+`hack/host/` prepares and hands back a host that is not ours to keep: `baseline.sh --save` records
+the home directory, the packages and the sysctls before any change; `sudo prep-root.sh` installs
+docker and the few packages the scripts need, puts the OS user in the docker group and raises the
+kernel and docker limits (recorded for the revert); `install-tools.sh` puts Go, kubectl, kind, ko
+and uv under the user's home; `sudo sshd-priority.sh` keeps sshd responsive under load. At the end
+`wipe.sh plan`, then `wipe.sh wipe` (our processes, the kind cluster, everything the baseline did
+not have), then `sudo revert-root.sh` (the files, the sysctls and the packages prep-root added, by
+name and never autoremove), and `~/.ssh` by hand last.
+
+### Probes
+
+`scripts/probes/` answers the questions a new host or sandbox class raises before a long run:
+`counter-roundtrip.sh` suspends and resumes the counter demo's actor and checks the in-RAM count
+continues; `guest_memory.py IMAGE` reads one sandbox's guest and host memory idle, after a
+page-cache fill and after a cache drop, then times a pause (with the snapshot files' sizes) and a
+resume; `burst.sh N` creates N small sandboxes together with pauses between short burns while
+`host-counts.sh` samples processes, threads, file descriptors and taps; `cancelled_pause.py`
+drops a suspend call client-side and repeats it, then execs again.
+
 ## Authentication and trust
 
 `ateapi` rejects unauthenticated calls. The provider mints a token for the ServiceAccount

@@ -57,6 +57,8 @@ Environment: `ATESPACE` (default `nemo-gym`), `WORKLOAD` (the WorkerPool label t
 - `scripts/oversub_provider.py`: more sandboxes than workers, each stepping with gaps, straight against the provider.
 - `scripts/delete_actors.py`: delete actors by name or by state.
 - `scripts/ladder/`: the saturation ladder (Gym arms at 1x to 4x the slots, burn arms at 4x and 8x), one stage per invocation with stop rules (docs/provider.md, The saturation ladder).
+- `scripts/probes/`: one-sandbox and one-burst probes for a new host or sandbox class: memory round trips, guest and host memory with pause and resume cost, a burst with host counts, a cancelled pause (docs/provider.md, Probes).
+- `hack/host/`: a borrowed host from baseline to hand-back: prep-root, install-tools, sshd-priority, wipe, revert-root (docs/provider.md, A borrowed host).
 - `hack/rerun-all.sh`: a prepared host to a passing gate in one pass, each step gated on its evidence line, with `RUNTIME=gvisor` or `microvm`; `hack/host-check.sh`, `kind-up.sh`, `gvisor-asset.sh`, `images.sh`, `gym-checkout.sh` and `gate.sh` are its steps (docs/provider.md, From zero).
 - `manifests/gym-workerpool.yaml`, `manifests/nodeports.yaml`, `manifests/grafana-sandbox-lifecycle.yaml`: a pool of eight-slot workers for cpu 1 / 4Gi actors, the API and the router on NodePorts, Grafana with the "Sandbox lifecycle" dashboard.
 
