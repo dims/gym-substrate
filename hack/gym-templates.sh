@@ -110,9 +110,6 @@ resources:
 snapshotConfig:
   preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
   storageLocation: gs://${BUCKET_NAME}/${ATESPACE}/
-sandboxConfig:
-  sandboxClass: SANDBOX_CLASS_GVISOR
-  configName: gvisor-default
 MANIFEST
   echo "${ATESPACE}/${name} serves ${ref}"
 done
