@@ -139,7 +139,7 @@ collapsed under load and cancelled in-flight pauses. On kind the node address is
 
 On kind, also run `bash hack/kind-api-access.sh` (`hack/kind-up.sh` does this).
 Substrate denies API ingress from outside approved pods by default. This adds access
-to API port 443 from the Docker bridge gateway, where the host-side provider runs;
+to API port 443 from Docker's kind network: the host, where the provider runs, and the nodes, whose addresses a NodePort request carries when kube-proxy forwards it to another node;
 other pods remain subject to Substrate's policies. TLS and token authentication still apply.
 
 **Host.** `fs.inotify.max_user_instances` (default 128, one budget per user shared by

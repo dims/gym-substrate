@@ -100,7 +100,7 @@ for _ in $(seq 1 12); do
   sleep 5
 done
 if [ "$A" = 000 ] || [ "$R" = 000 ]; then fail NODEPORTS "api $A router $R after 60 s"; fi
-echo "node ip $NODE_IP; api np https $A, router np http $R"
+echo "node ip $NODE_IP; api np https $A, router np http $R, prometheus np http $(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$NODE_IP:30090/-/ready")"
 
 step "demo pools and gym pools"
 # The demo of each class carries the install's worker image for that class; the gym pools
