@@ -58,6 +58,22 @@ pods_settled() { [ -z "$(kubectl -n ate-system get pods --no-headers 2>/dev/null
 wait_for 300 "ate-system pods" pods_settled || { kubectl -n ate-system get pods; fail ATE_SYSTEM_PODS; }
 echo "ate-system pods: $(kubectl -n ate-system get pods --no-headers | awk '$3=="Running"' | wc -l | tr -d ' ') running, $(kubectl -n ate-system get pods --no-headers | awk '$3=="Completed"' | wc -l | tr -d ' ') completed"
 
+step "control-plane placement"
+# With worker nodes, the stateless control-plane pods live on the control-plane node, where no
+# sandbox runs: a few hundred sandboxes per node starved them into liveness kills otherwise.
+WORKER_NODES=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}')
+CP_DEPLOYS="ate-api-server atenet-router atenet-egress ate-controller k8s-credential-provider"
+if [ -n "$WORKER_NODES" ]; then
+  for d in $CP_DEPLOYS; do
+    kubectl -n ate-system get deploy "$d" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null | grep -q control-plane && continue
+    kubectl -n ate-system patch deploy "$d" --type=merge -p '{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":""},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}}' >/dev/null || fail CP_PIN "$d"
+  done
+  for d in $CP_DEPLOYS; do kubectl -n ate-system rollout status "deploy/$d" --timeout=300s >/dev/null || fail CP_ROLLOUT "$d"; done
+  echo "control-plane pods by node: $(kubectl -n ate-system get pods -o wide --no-headers | awk '{print $7}' | sort | uniq -c | tr -s ' \n' ' ')"
+else
+  echo "one node: nothing to place"
+fi
+
 step "sandbox class $RUNTIME"
 if [ "$RUNTIME" = microvm ]; then
   docker exec kind-control-plane test -e /dev/kvm || fail KVM "the kind nodes have no /dev/kvm; the cluster must be created on a host where docker can use the device"
@@ -159,7 +175,6 @@ ${2:+    nodeSelector:
   workerImage: $WI
 POOL
 }
-WORKER_NODES=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}')
 POOLS="$RUN_DIR/gym-workerpools.yaml"; : > "$POOLS"; n_pools=0
 if [ -n "$WORKER_NODES" ]; then
   for n in $WORKER_NODES; do n_pools=$((n_pools + 1)); render_pool "gym-workerpool-$n_pools" "$n" >> "$POOLS"; echo "---" >> "$POOLS"; done
