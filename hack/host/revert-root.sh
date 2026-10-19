@@ -23,16 +23,19 @@ if [ "${2:-}" != keep-docker ]; then
   rm -rf /var/lib/docker /etc/docker /var/lib/containerd /etc/containerd; groupdel docker 2>/dev/null; echo "docker state and group removed"
   echo "docker iptables chains still loaded until a reboot: $(iptables -S 2>/dev/null | grep -c DOCKER)"
 fi
-# The other packages prep-root added, by name; docker's own are handled above. No autoremove:
-# it took packages the lab had marked automatic on an earlier host.
+# Every other package prep-root added, by name from its before/after lists, including the
+# dependencies apt pulled in for docker: a purge of docker.io leaves them installed. No autoremove:
+# it took packages the lab had marked automatic on an earlier host. With keep-docker the docker
+# packages and their dependencies stay.
 if [ -s "$P/pkgs-before.txt" ] && [ -s "$P/pkgs-after.txt" ]; then
-  added=$(comm -13 "$P/pkgs-before.txt" "$P/pkgs-after.txt" | grep -v -E '^(docker\.io|docker-buildx|containerd|runc|bridge-utils|pigz|ubuntu-fan)$' | tr '\n' ' ')
+  added=$(comm -13 "$P/pkgs-before.txt" "$P/pkgs-after.txt" | grep -v -E '^(docker\.io|docker-buildx)$')
+  [ "${2:-}" = keep-docker ] && added=$(echo "$added" | grep -v -E '^(containerd|runc|bridge-utils|pigz|ubuntu-fan)$')
+  added=$(echo "$added" | tr '\n' ' ')
   if [ -n "$added" ]; then
     # shellcheck disable=SC2086
     if apt-get purge -y -qq $added >> "$P/apt-purge.log" 2>&1; then echo "purged: $added"; else echo "purge of added packages FAILED"; tail -3 "$P/apt-purge.log"; fi
   else echo "no other packages to purge"; fi
 fi
 systemctl set-property --runtime ssh.service CPUWeight=100 MemoryLow=0 2>/dev/null && echo "ssh.service CPUWeight/MemoryLow reset"
-[ -d /root/go ] && rm -rf /root/go /root/.cache/go-build && echo "/root/go removed"
 echo "packages now: $(dpkg-query -W -f '${db:Status-Abbrev}\n' | grep -c '^ii') installed"
 echo "== $(date -u +%FT%TZ) revert-root done"

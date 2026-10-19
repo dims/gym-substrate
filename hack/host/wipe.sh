@@ -41,7 +41,9 @@ if [ "$MODE" = wipe ]; then
   chmod -R u+w "$HOME/go" "$HOME/.cache/go-build" 2>/dev/null   # the Go module cache is read-only and blocks rm
   for d in $OURS_DIRS; do rm -rf -- "$d"; done
   for f in $OURS_FILES; do rm -f -- "$f"; done
-  rmdir "$HOME/.local/bin" "$HOME/.local/share" "$HOME/.local" "$HOME/.config" "$HOME/.cache" 2>/dev/null
+  for d in .local/bin .local/share .local .config .cache; do   # empty parents we may have created; the baseline's stay
+    grep -qx "${d%%/*}" "$B/home.txt" || rmdir "$HOME/$d" 2>/dev/null
+  done
   ex=$(extras | tr '\n' ' '); if [ -n "$ex" ]; then echo "removing home entries not in the baseline: $ex"; (cd ~ && for e in $ex; do rm -rf -- "./$e"; done); fi
   sed -i '/\.local\/bin\/env/d' ~/.bashrc ~/.profile 2>/dev/null
   find /tmp -maxdepth 1 -user "$(id -un)" -newermt "$(cat "$B/when.txt")" -exec rm -rf {} + 2>/dev/null
