@@ -52,7 +52,7 @@ image, which runs untouched, and sets it as the container command.
 - [#2493](https://github.com/agent-substrate/substrate/pull/2493), [#2496](https://github.com/agent-substrate/substrate/pull/2496), [#2557](https://github.com/agent-substrate/substrate/pull/2557): ateapi's PostgreSQL pool defaults to 20 connections, the postgres probes get 5 s and 10 s timeouts, and the control-plane pods get CPU requests and 5 s probes. Without them a few hundred sandboxes per node starve the control plane.
 - [#2560](https://github.com/agent-substrate/substrate/pull/2560): the router's route timeout, parked budget and ext_proc breaker become install settings. Without it, patch the router Deployment after every install (see Cluster).
 
-Last tested: the plugin at c02a7db against Substrate `main` f03327bd with those changes and Gym `main` 43a5e5c0b with those pull requests.
+Last tested: the plugin at a1f746c against Substrate `main` ddb46651d with those changes merged, on kind with two worker nodes and the micro-VM class (`RUNTIME=microvm`), and Gym `main` b3103ea8a with #4551 (2026-10-19).
 
 **Tools.** `kubectl`, `kubectl-ate` (built from the Substrate checkout), `ko`, `go`, `uv`, and `docker` to push images into the cluster's registry.
 
