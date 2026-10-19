@@ -57,8 +57,10 @@ SRC_CFG=$(.venv/bin/python -c "import gym_substrate, pathlib; print(pathlib.Path
 sed -E -e "s#ateapi_addr: .*#ateapi_addr: $NODE_IP:30443#" -e "s#atenet_addr: .*#atenet_addr: $NODE_IP:30080#" "$SRC_CFG" > "$RUN_DIR/substrate.yaml"
 sed -E 's/suspend_policy: .*/suspend_policy: never/' "$RUN_DIR/substrate.yaml" > "$RUN_DIR/substrate-never.yaml"
 echo "configs: $(grep -E 'ateapi_addr|atenet_addr|suspend_policy' "$RUN_DIR/substrate.yaml" | tr -s ' ' | tr '\n' ';')"
-# Pins for the venvs the Gym servers build from their requirements.txt (uv pip install
-# honors UV_CONSTRAINT, which scripts/run_arm.sh exports); the head venv follows Gym's lock.
-printf '%s\n' '# litellm 1.106.0 (2026-10-18) imports CacheableResult from mcp 2; nemo-gym pins mcp<2.' 'litellm<1.106' > "$RUN_DIR/constraints.txt"
-echo "server venv constraints: $(grep -v '^#' "$RUN_DIR/constraints.txt" | tr '\n' ' ')"
+# The agent server builds its own venv from its requirements.txt, where litellm floats:
+# 1.106.0 (2026-10-18) imports CacheableResult from mcp 2 and nemo-gym pins mcp<2. Pin it in
+# this checkout (a local edit, like the plugin in pyproject.toml); the head venv follows the lock.
+REQ=responses_api_agents/mini_swe_agent_2/requirements.txt
+grep -q '^litellm' "$REQ" || echo 'litellm<1.106' >> "$REQ"
+echo "agent server pins: $(grep -E '^(litellm|mini-swe-agent|swebench)' "$REQ" | tr '\n' ' ')"
 step "gym-checkout done"

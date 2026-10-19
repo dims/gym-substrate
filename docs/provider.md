@@ -366,11 +366,10 @@ unset, a missing arm64 task image is built from the pinned commit of
 archives are reused; an explicitly supplied directory disables the build fallback.
 Only tasks with a `Dockerfile.arm64` in that commit can be built this way;
 `POST_KIND_HOOK`, a script run once the cluster exists, for a host whose firewall drops
-forwarded traffic until the kind bridge is allowed. `hack/gym-checkout.sh` writes
-`WORK/run/constraints.txt` and `scripts/run_arm.sh` exports it as `UV_CONSTRAINT`, so the
-venvs the Gym servers build from their `requirements.txt` take the pins in it (today
-`litellm<1.106`: 1.106.0 needs mcp 2, which nemo-gym excludes); the head venv follows Gym's
-lock. Delete a server's `.venv` after changing the pins.
+forwarded traffic until the kind bridge is allowed. `hack/gym-checkout.sh` also pins
+`litellm<1.106` in the agent server's `requirements.txt` of the checkout (1.106.0 needs mcp 2,
+which nemo-gym excludes; the server builds its own venv from that file and the head venv
+follows Gym's lock). Delete the server's `.venv` after changing a pin.
 
 Measured on 32-vCPU hosts: about 20 min cold on an amd64 host that had only the tools
 installed (kind 24 s, the Substrate install 4 min, templates 1 min, Gym checkout and venv

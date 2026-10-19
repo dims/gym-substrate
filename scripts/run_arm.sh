@@ -40,8 +40,6 @@ ray stop --force >/dev/null 2>&1; sleep 2
 SERVER_LOG="$LOG_DIR/gym-env-$NAME.log"
 : > "$SERVER_LOG"; ln -sf "$SERVER_LOG" "$LOG_DIR/gym-env.log"
 CONFIGS="$AGENT_CFG,$CFG,$MODEL_CFG${EXTRA_CONFIGS:+,$EXTRA_CONFIGS}"
-# A server that builds its own venv installs with uv pip, which honors UV_CONSTRAINT.
-[ -s "$RUN_DIR/constraints.txt" ] && export UV_CONSTRAINT="${UV_CONSTRAINT:-$RUN_DIR/constraints.txt}"
 nohup gym env start "+config_paths=[$CONFIGS]" > "$SERVER_LOG" 2>&1 < /dev/null &
 n=0
 for _ in $(seq 1 $(( ${SERVER_WAIT_S:-600} / 5 ))); do
