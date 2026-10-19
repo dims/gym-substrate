@@ -18,6 +18,8 @@ export ATEAPI_ADDR="$NODE_IP:30443" ATENET_ADDR="$NODE_IP:30080" ATESPACE RUN_DI
 cd "$GYM_DIR" || fail GYM_DIR "$GYM_DIR"
 # shellcheck disable=SC1091
 source .venv/bin/activate
+TPL=$(python3 -c "import sys; from gym_substrate.provider import template_name_for_image as t; print(t(sys.argv[1]))" "$IMAGE")
+kubectl ate get actor-template "$TPL" -a "$ATESPACE" >/dev/null 2>&1 || fail TEMPLATE "no template $TPL for $IMAGE; run scripts/ladder/ladder-templates.sh first"
 [ "$(actors_left)" -eq 0 ] || fail ACTORS_LEFT "$(actors_left) actors in $ATESPACE"
 STAMP=$(date -u +%H%M%S); COUNTS="$RUN_DIR/host-counts-burst-$STAMP.txt"
 bash "$(dirname "$0")/host-counts.sh" "$COUNTS" 5 & SAMPLER=$!
