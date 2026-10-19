@@ -56,6 +56,7 @@ class _Recorder:
         exec_body: dict[str, Any] | None = None,
         exec_status: int = 200,
         probe_status: int = 200,
+        probe_body: str = "",
         create_error: Exception | None = None,
         exec_delay_s: float = 0.0,
         pause_delay_s: float = 0.0,
@@ -66,6 +67,7 @@ class _Recorder:
         self._exec_body = exec_body if exec_body is not None else {"stdout": "ok", "stderr": "", "exit_code": 0}
         self._exec_status = exec_status
         self._probe_status = probe_status
+        self._probe_body = probe_body
         self._create_error = create_error
         self._exec_delay_s = exec_delay_s
         self._pause_delay_s = pause_delay_s
@@ -120,7 +122,7 @@ class _Recorder:
         if path == "/download":
             return httpx.Response(200, content=b"payload")
         # readiness probe and everything else
-        return httpx.Response(self._probe_status)
+        return httpx.Response(self._probe_status, text=self._probe_body)
 
     def rpcs(self) -> list[str]:
         """The control calls in order; a SuspendActor is "pause" or "suspend" by its mode."""
@@ -824,6 +826,23 @@ async def test_exec_warns_when_it_gives_up_after_capacity_retries(
     assert len(warnings) == 1 and "gave up" in warnings[0] and handle.sandbox_id in warnings[0]
     # The first attempt, plus one per retry the line counts.
     assert execs == _capacity_retries(warnings[0]) + 1 >= 2
+
+
+async def test_create_fails_at_once_when_the_actor_crashed() -> None:
+    # The router's 503 names a reason that will not clear; the create must not wait out its budget.
+    recorder = _Recorder(probe_status=503, probe_body="actor swebench/gym-x unavailable: actor state is CRASHED")
+    provider = substrate_provider.SubstrateProvider(
+        connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE},
+        create={"ready_timeout_s": 30.0, "ready_queue_timeout_s": 30.0, "idle_before_suspend_s": 0.0},
+        probe={"stable_delay_s": 0.0},
+    )
+    provider._control = recorder.control  # type: ignore[method-assign]
+    provider._http = recorder.http  # type: ignore[method-assign]
+    t0 = asyncio.get_running_loop().time()
+    with pytest.raises(substrate_provider.SubstrateCreateVerificationError, match="cannot become ready"):
+        await provider.create(SandboxSpec(image=IMAGE))
+    assert asyncio.get_running_loop().time() - t0 < 5.0
+    assert recorder.rpcs().count("DeleteActor") == 1
 
 
 async def test_failed_create_cleanup_keeps_deleting_in_the_background(monkeypatch: pytest.MonkeyPatch) -> None:

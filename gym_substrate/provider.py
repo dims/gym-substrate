@@ -709,7 +709,14 @@ class SubstrateProvider:
                 else:
                     consecutive = 0
                     last_detail = f"status={response.status_code}, body={response.text.strip()!r}"
-                    queued = _classify_unavailable(response) == "capacity"
+                    kind = _classify_unavailable(response)
+                    queued = kind == "capacity"
+                    if response.status_code == 503 and kind is None:
+                        # The router names a reason that will not clear: the actor crashed at
+                        # its first resume, or is gone. Waiting out the budget helps nobody.
+                        raise SubstrateCreateVerificationError(
+                            f"actor {handle.sandbox_id!r} cannot become ready: {last_detail}"
+                        )
             except httpx.HTTPError as e:
                 consecutive = 0
                 last_detail = repr(e)

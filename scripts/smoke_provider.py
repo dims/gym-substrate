@@ -41,8 +41,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 IMAGE = sys.argv[1] if len(sys.argv) > 1 else "python:3.12-slim"
 POLICY = sys.argv[2] if len(sys.argv) > 2 else "pause_after_exec"
 ATESPACE = os.environ.get("ATESPACE", "nemo-gym")
-# idle_before_suspend_s in configs/substrate.yaml is 1 s; wait past it before reading the state.
+# idle_before_suspend_s in configs/substrate.yaml is 1 s; wait past it before reading the state,
+# then give the checkpoint itself up to SETTLE_WAIT_S.
 PARK_WAIT_S = 1.5
+SETTLE_WAIT_S = 60.0
 
 
 def is_parked(actor, policy: str) -> bool:
@@ -62,11 +64,18 @@ def is_parked(actor, policy: str) -> bool:
 
 
 async def check_parked(provider, handle, label: str) -> bool:
+    # The idle delay, then the transition itself: a checkpoint takes longer than a second on a slow
+    # host, so wait until the actor has left SUSPENDING (bounded by SETTLE_WAIT_S).
+    t0 = time.monotonic()
     await asyncio.sleep(PARK_WAIT_S)
-    actor = await provider._control("GetActor", ateapi_pb2.GetActorRequest(actor=handle.raw.object_ref))
+    while True:
+        actor = await provider._control("GetActor", ateapi_pb2.GetActorRequest(actor=handle.raw.object_ref))
+        if actor.status.state != ateapi_pb2.ActorState.ACTOR_STATE_SUSPENDING or time.monotonic() - t0 > SETTLE_WAIT_S:
+            break
+        await asyncio.sleep(0.5)
     state = ateapi_pb2.ActorState.Name(actor.status.state)
     parked = is_parked(actor, POLICY)
-    print(f"parked    {PARK_WAIT_S:6.1f}s  state={state} snapshot_matches_policy={parked} ({label})")
+    print(f"parked    {time.monotonic() - t0:6.1f}s  state={state} snapshot_matches_policy={parked} ({label})")
     return parked
 
 
