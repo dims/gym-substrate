@@ -53,6 +53,8 @@ jobs:
         if: failure()
         run: |
           export PATH="$HOME/gym-substrate-run/bin:$PATH"
+          kubectl get pods -A -o wide --field-selector=status.phase!=Running,status.phase!=Succeeded || true
+          kubectl -n ate-demo-sandbox describe pods 2>/dev/null | grep -E 'Warning|Insufficient|FailedScheduling|Error' | tail -n 20 || true
           kubectl -n ate-system get pods -o wide || true
           kubectl ate get actors -a nemo-gym || true
           kubectl ate get workers || true

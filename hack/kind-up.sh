@@ -108,7 +108,10 @@ step "demo pools and gym pools"
 # The demo of each class carries the install's worker image for that class; the gym pools
 # reuse it. The micro-VM demo also builds a golden snapshot, so its success means a guest
 # booted, checkpointed and restored on this host.
-if kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool >/dev/null 2>&1; then
+if [ "$RUNTIME" = microvm ]; then
+  # No gVisor demo pool on a micro-VM run: its two workers would only take room on a small host.
+  kubectl get namespace ate-demo-sandbox >/dev/null 2>&1 || kubectl create namespace ate-demo-sandbox >/dev/null || fail NAMESPACE
+elif kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool >/dev/null 2>&1; then
   echo "demo sandbox present"
 else
   hack/install-ate-kind.sh --deploy-demo-sandbox > "$LOG_DIR/demo-sandbox.log" 2>&1 || { tail -10 "$LOG_DIR/demo-sandbox.log"; fail DEMO_SANDBOX; }
@@ -125,8 +128,10 @@ else
   WI=$(kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool -o jsonpath='{.spec.workerImage}')
 fi
 [ -n "$WI" ] || fail WORKER_IMAGE
-# A micro-VM worker's memory request equals its limit: the guest RAM plus the VMM reserve has
-# to be there. A gVisor worker's actors page in what they touch.
+# Capacity comes from the limits; the requests only place the pod, so the CPU request stays small
+# (a one-node kind on a 4-CPU runner has no spare core). A micro-VM worker's memory request equals
+# its limit: the guest RAM plus the VMM reserve has to be there. A gVisor worker's actors page in
+# what they touch.
 if [ "$RUNTIME" = microvm ]; then POOL_MEMORY_REQUEST="$POOL_MEMORY"; else POOL_MEMORY_REQUEST="${POOL_MEMORY_REQUEST:-$POOL_MEMORY}"; fi
 render_pool() { # render_pool NAME [NODE]
   cat <<POOL
@@ -149,7 +154,7 @@ ${2:+    nodeSelector:
         cpu: "$POOL_CPU"
         memory: $POOL_MEMORY
       requests:
-        cpu: "1"
+        cpu: 250m
         memory: $POOL_MEMORY_REQUEST
   workerImage: $WI
 POOL
