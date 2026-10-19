@@ -10,7 +10,9 @@ Creates one sandbox (suspend policy never) and reads, at each step, the guest's 
 UID in their command lines on the kind node that runs the worker (the worker image has no shell, so
 the node container is asked through docker): the proportional set size summed over them, so the
 guest RAM that the VMM and virtiofsd both map counts once, plus each one's own resident size.
-Steps: idle; after a page-cache fill (every regular file under 64 MiB
+Steps: idle; a first touch of TOUCH_GIB of anonymous memory in the guest (one byte per 4 KiB
+page, timed: on a micro-VM every page is a host fault, so this is the rate at which a fresh VM takes
+memory); after a page-cache fill (every regular file under 64 MiB
 read once, bounded by FILL_TIMEOUT_S); after `echo 3 > drop_caches` in the guest; SETTLE_S later
 (free page reporting returns freed guest pages to the host over time); then one pause
 (timed, with the node-local snapshot files' sizes) and one resume (timed, the first exec after it).
@@ -35,6 +37,13 @@ IMAGE = sys.argv[1] if len(sys.argv) > 1 else "python:3.12-slim"
 ATESPACE = os.environ.get("ATESPACE", "nemo-gym")
 FILL_TIMEOUT_S = float(os.environ.get("FILL_TIMEOUT_S", "600"))
 SETTLE_S = float(os.environ.get("SETTLE_S", "60"))
+TOUCH_GIB = float(os.environ.get("TOUCH_GIB", "1"))
+# One byte per page through a strided slice assignment: no Python loop in the timed part.
+TOUCH = (
+    "python3 -c 'import mmap,time\nn=%d\nt=time.monotonic()\nm=mmap.mmap(-1,n)\n"
+    'm[::4096]=b"\\1"*(n//4096)\nd=time.monotonic()-t\n'
+    'print("touch_s=%%.2f touch_mb_s=%%.0f"%%(d,n/2**20/d))\''
+) % int(TOUCH_GIB * 2**30)
 GUEST_VIEW = 'free -m | awk \'NR==2 {print "guest_total_mb=" $2, "used_mb=" $3, "cache_mb=" $6, "avail_mb=" $7}\'; df -m / | awk \'NR==2 {print "rootfs_used_mb=" $3}\''
 
 
@@ -122,6 +131,7 @@ async def main() -> int:
         failures += r.return_code != 0
 
     await row("idle", GUEST_VIEW)
+    await row("touch", f"{TOUCH}; {GUEST_VIEW}", 900)
     await row(
         "fill",
         f"find / -xdev -type f -size -64M -print0 2>/dev/null | xargs -0 cat > /dev/null 2>&1; {GUEST_VIEW}",

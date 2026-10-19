@@ -398,9 +398,10 @@ name and never autoremove), and `~/.ssh` by hand last.
 
 `scripts/probes/` answers the questions a new host or sandbox class raises before a long run:
 `counter-roundtrip.sh` suspends and resumes the counter demo's actor and checks the in-RAM count
-continues; `guest_memory.py IMAGE` reads one sandbox's guest and host memory idle, after a
-page-cache fill and after a cache drop, then times a pause (with the snapshot files' sizes) and a
-resume; `burst.sh N` creates N small sandboxes together with pauses between short burns while
+continues; `guest_memory.py IMAGE` reads one sandbox's guest and host memory idle, after a first
+touch of 1 GiB of anonymous memory (timed: on a micro-VM every new page is a host fault), after a
+page-cache fill, after a cache drop and a minute later, then times a pause (with the snapshot
+files' sizes) and a resume; `burst.sh N` creates N small sandboxes together with pauses between short burns while
 `host-counts.sh` samples processes, threads, file descriptors and taps; `cancelled_pause.py`
 drops a suspend call client-side and repeats it, then execs again.
 
