@@ -28,7 +28,8 @@ AGENT_IMAGE="${AGENT_IMAGE:-$(kubectl ate get actor-template -a "$ATESPACE" -o y
 for spec in "burn 1 4Gi" "burn-s 500m 2Gi" "burn-xs 250m 1Gi" "burn-xxs 125m 512Mi"; do
   # shellcheck disable=SC2086
   set -- $spec
-  KO_DOCKER_REPO="$REGISTRY" BUCKET_NAME="$BUCKET_NAME" WORKLOAD=gym ACTOR_CPU="$2" ACTOR_MEMORY="$3" ATESPACE="$ATESPACE" ${AGENT_IMAGE:+AGENT_IMAGE="$AGENT_IMAGE"} WAIT_GOLDEN=1 \
+  # An empty AGENT_IMAGE lets gym-templates.sh build one with ko.
+  KO_DOCKER_REPO="$REGISTRY" BUCKET_NAME="$BUCKET_NAME" WORKLOAD=gym ACTOR_CPU="$2" ACTOR_MEMORY="$3" ATESPACE="$ATESPACE" AGENT_IMAGE="$AGENT_IMAGE" WAIT_GOLDEN=1 \
     bash "$REPO/hack/gym-templates.sh" "$REGISTRY/$1:3.12-slim" > "$LOG_DIR/template-$1.log" 2>&1 || { tail -5 "$LOG_DIR/template-$1.log"; fail TEMPLATE "$1"; }
   echo "template $1 ($2 / $3): $(tail -1 "$LOG_DIR/template-$1.log")"
   [ -n "$AGENT_IMAGE" ] || AGENT_IMAGE=$(kubectl ate get actor-template -a "$ATESPACE" -o yaml 2>/dev/null | grep -o -m1 "$REGISTRY/sandbox-agent@sha256:[0-9a-f]*")
