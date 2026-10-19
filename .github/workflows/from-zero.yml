@@ -16,6 +16,10 @@ jobs:
   from-zero:
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [gvisor, microvm]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -40,6 +44,7 @@ jobs:
         env:
           GYM_SUBSTRATE_SOURCE: ${{ github.workspace }}
           GATE_INSTANCE: ${{ inputs.gate_instance || 'scikit-learn__scikit-learn-14141' }}
+          RUNTIME: ${{ matrix.runtime }}
           POOL_REPLICAS: '1'
           POOL_CPU: '2'
           POOL_MEMORY: '6Gi'
@@ -55,7 +60,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: from-zero-logs
+          name: from-zero-logs-${{ matrix.runtime }}
           path: |
             ~/gym-substrate-run/logs
             ~/gym-substrate-run/run/*.txt

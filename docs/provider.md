@@ -328,8 +328,8 @@ gaps, straight against the provider.
 
 `hack/rerun-all.sh` takes a host that passes `hack/host-check.sh` (docker with buildx, kind,
 kubectl, go, ko, uv, zstd, psmisc, the inotify sysctls, container egress) to a passing gate
-in one pass: Substrate from upstream main on a one-node kind cluster with the router
-settings, the NodePorts, the demo sandbox and a gym pool (`hack/kind-up.sh`); the task
+in one pass: Substrate from upstream main on a kind cluster with the sandbox class, the router
+settings, the NodePorts, the demo pools and the gym pools (`hack/kind-up.sh`); the task
 images in the kind registry (`hack/images.sh`); the templates with their golden snapshots
 (`hack/gym-templates.sh`); a Gym checkout with the pull requests and the plugin
 (`hack/gym-checkout.sh`); the smoke and one rollout (`hack/gate.sh`). Each step stops at
@@ -349,7 +349,16 @@ dims/Nemo-Gym branches merged on top; default the four pull requests under Requi
 `GATE_INSTANCE` (default `scikit-learn__scikit-learn-14141`, the one recorded rollout in Gym's
 examples that resolves; the gate requires reward 1.0) and `EXTRA_IMAGES`;
 `POOL_REPLICAS`, `POOL_CPU`, `POOL_MEMORY` (default 3 workers of cpu 6 / 12Gi, nine slots for
-cpu 1 / 4Gi actors); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel (a
+cpu 1 / 4Gi actors; when the kind cluster has worker nodes, one pool of `POOL_REPLICAS` is
+pinned to each of them, since a paused actor resumes on its own node); `RUNTIME`, the
+sandbox class of the pools: `gvisor` (default) or `microvm` (Substrate's Cloud Hypervisor
+class: the host needs `/dev/kvm`, `hack/kind-up.sh` installs the micro-VM assets and
+SandboxConfig through Substrate's `hack/install-microvm-deps.sh`, deploys the
+counter-microvm demo for the class's worker image, and gives each worker a memory request
+equal to its limit; an actor's guest gets its memory limit minus 128 MiB, so `ACTOR_MEMORY`
+below 256Mi is rejected); `MICROVM_ASSET_DIR`, a set made by Substrate's
+`hack/microvm-assets/assemble.sh` for a host without egress to GitHub (downloaded when
+unset); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel with the gvisor class (a
 `gvisor.tar.zstd` built with `--define=pagesize=64k` and its `.sha256`, uploaded by
 `hack/gvisor-asset.sh`); `IMAGE_TARBALLS`, a directory of zstd-compressed `docker save`
 tarballs for an image that is not public, such as the arm64 sklearn image. When

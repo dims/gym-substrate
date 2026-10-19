@@ -2,14 +2,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Substrate on a one-node kind cluster, ready for the Gym provider: the install, the 64 KiB
-# gVisor asset when the host needs it, the router settings, NodePorts, the demo sandbox and
-# the gym WorkerPool. Steps that are already done are skipped.
+# Substrate on a kind cluster, ready for the Gym provider: the install, the sandbox class
+# (the 64 KiB gVisor asset when the host needs it, or the micro-VM assets and SandboxConfig),
+# the router settings, NodePorts, the demo pools and the gym WorkerPools. Steps that are
+# already done are skipped.
 #   hack/kind-up.sh
 # Environment: WORK, SUBSTRATE_DIR (default WORK/substrate), SUBSTRATE_REF (default
-# upstream/main), GVISOR_ASSET_DIR (required on a 64 KiB-page kernel), POST_KIND_HOOK (a script
-# run once the cluster exists, for a host firewall), POOL_REPLICAS / POOL_CPU / POOL_MEMORY
-# (default 3 / 6 / 12Gi).
+# upstream/main), RUNTIME (gvisor or microvm), GVISOR_ASSET_DIR (required on a 64 KiB-page
+# kernel with gvisor), MICROVM_ASSET_DIR (a set made by Substrate's
+# hack/microvm-assets/assemble.sh; downloaded when unset), POST_KIND_HOOK (a script run once
+# the cluster exists, for a host firewall), POOL_REPLICAS / POOL_CPU / POOL_MEMORY (default
+# 3 / 6 / 12Gi; with worker nodes, one pool of POOL_REPLICAS pinned to each worker node).
 set -uo pipefail
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/_lib.sh"
@@ -53,8 +56,23 @@ pods_settled() { [ -z "$(kubectl -n ate-system get pods --no-headers 2>/dev/null
 wait_for 300 "ate-system pods" pods_settled || { kubectl -n ate-system get pods; fail ATE_SYSTEM_PODS; }
 echo "ate-system pods: $(kubectl -n ate-system get pods --no-headers | awk '$3=="Running"' | wc -l | tr -d ' ') running, $(kubectl -n ate-system get pods --no-headers | awk '$3=="Completed"' | wc -l | tr -d ' ') completed"
 
-step "gvisor asset"
-if [ "$(getconf PAGESIZE)" = 65536 ]; then
+step "sandbox class $RUNTIME"
+if [ "$RUNTIME" = microvm ]; then
+  docker exec kind-control-plane test -e /dev/kvm || fail KVM "the kind nodes have no /dev/kvm; the cluster must be created on a host where docker can use the device"
+  if kubectl get sandboxconfig microvm >/dev/null 2>&1; then
+    echo "microvm SandboxConfig present"
+  else
+    # install-microvm-deps.sh assembles the asset set into OUT unless a current one is there,
+    # stages it into the install's rustfs bucket and applies the SandboxConfig.
+    HOST_ARCH=$(arch)
+    (
+      export ATE_INSTALL_KIND=true NO_DEV_ENV=true KUBECTL_CONTEXT=kind-kind BUCKET_NAME="${BUCKET_NAME:-ate-snapshots}" ARCH="$HOST_ARCH"
+      [ -z "${MICROVM_ASSET_DIR:-}" ] || export OUT="$MICROVM_ASSET_DIR"
+      hack/install-microvm-deps.sh --install
+    ) > "$LOG_DIR/microvm-deps.log" 2>&1 || { tail -15 "$LOG_DIR/microvm-deps.log"; fail MICROVM_DEPS; }
+  fi
+  echo "microvm SandboxConfig version $(kubectl get sandboxconfig microvm -o jsonpath='{.spec.defaultVersion}'), $(arch) assets; kvm nodes: $(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}={.status.capacity.ate\.dev/kvm} {end}')"
+elif [ "$(getconf PAGESIZE)" = 65536 ]; then
   [ -n "${GVISOR_ASSET_DIR:-}" ] || fail GVISOR_ASSET "64 KiB pages: set GVISOR_ASSET_DIR to a runsc build made with --define=pagesize=64k (gvisor.tar.zstd and its .sha256)"
   bash "$REPO/hack/gvisor-asset.sh" "$GVISOR_ASSET_DIR" > "$LOG_DIR/gvisor-asset.log" 2>&1 || { tail -10 "$LOG_DIR/gvisor-asset.log"; fail GVISOR_ASSET; }
   tail -1 "$LOG_DIR/gvisor-asset.log"
@@ -84,15 +102,67 @@ done
 if [ "$A" = 000 ] || [ "$R" = 000 ]; then fail NODEPORTS "api $A router $R after 60 s"; fi
 echo "node ip $NODE_IP; api np https $A, router np http $R"
 
-step "demo sandbox and gym pool"
+step "demo pools and gym pools"
+# The demo of each class carries the install's worker image for that class; the gym pools
+# reuse it. The micro-VM demo also builds a golden snapshot, so its success means a guest
+# booted, checkpointed and restored on this host.
 if kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool >/dev/null 2>&1; then
   echo "demo sandbox present"
 else
   hack/install-ate-kind.sh --deploy-demo-sandbox > "$LOG_DIR/demo-sandbox.log" 2>&1 || { tail -10 "$LOG_DIR/demo-sandbox.log"; fail DEMO_SANDBOX; }
 fi
-WI=$(kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool -o jsonpath='{.spec.workerImage}'); [ -n "$WI" ] || fail WORKER_IMAGE
-sed -e "s#WORKER_IMAGE#$WI#" -e "s/replicas: .*/replicas: $POOL_REPLICAS/" -e "s/cpu: \"8\"/cpu: \"$POOL_CPU\"/" -e "s/memory: 32Gi/memory: $POOL_MEMORY/" -e "s/memory: 16Gi/memory: $POOL_MEMORY/" "$REPO/manifests/gym-workerpool.yaml" | kubectl apply -f - >/dev/null || fail GYM_POOL
-active_workers() { [ "$(kubectl ate get workers 2>/dev/null | awk '$2 ~ /^gym-workerpool/ && $3=="WORKER_STATE_ACTIVE"' | wc -l | tr -d ' ')" -ge "$POOL_REPLICAS" ]; }
-wait_for 300 "gym workers" active_workers || { kubectl get pods -n ate-demo-sandbox; fail GYM_POOL_WORKERS; }
-echo "gym workers active: $(kubectl ate get workers | awk '$2 ~ /^gym-workerpool/ && $3=="WORKER_STATE_ACTIVE"' | wc -l | tr -d ' ') of $POOL_REPLICAS (cpu $POOL_CPU / $POOL_MEMORY each)"
+if [ "$RUNTIME" = microvm ]; then
+  if kubectl get workerpool -n ate-demo-counter-microvm counter-microvm >/dev/null 2>&1; then
+    echo "demo counter-microvm present"
+  else
+    hack/install-ate-kind.sh --deploy-demo-counter-microvm > "$LOG_DIR/demo-counter-microvm.log" 2>&1 || { tail -15 "$LOG_DIR/demo-counter-microvm.log"; fail DEMO_COUNTER_MICROVM; }
+    echo "demo counter-microvm golden: $(kubectl ate get actor-templates -a ate-demo-counter-microvm 2>/dev/null | awk 'NR>1 {print $3}' | head -1)"
+  fi
+  WI=$(kubectl get workerpool -n ate-demo-counter-microvm counter-microvm -o jsonpath='{.spec.workerImage}')
+else
+  WI=$(kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool -o jsonpath='{.spec.workerImage}')
+fi
+[ -n "$WI" ] || fail WORKER_IMAGE
+# A micro-VM worker's memory request equals its limit: the guest RAM plus the VMM reserve has
+# to be there. A gVisor worker's actors page in what they touch.
+if [ "$RUNTIME" = microvm ]; then POOL_MEMORY_REQUEST="$POOL_MEMORY"; else POOL_MEMORY_REQUEST="${POOL_MEMORY_REQUEST:-$POOL_MEMORY}"; fi
+render_pool() { # render_pool NAME [NODE]
+  cat <<POOL
+apiVersion: ate.dev/v1alpha1
+kind: WorkerPool
+metadata:
+  name: $1
+  namespace: ate-demo-sandbox
+  labels:
+    workload: gym
+spec:
+  replicas: $POOL_REPLICAS
+  sandboxClasses:
+  - name: $RUNTIME
+  template:
+${2:+    nodeSelector:
+      kubernetes.io/hostname: $2
+}    resources:
+      limits:
+        cpu: "$POOL_CPU"
+        memory: $POOL_MEMORY
+      requests:
+        cpu: "1"
+        memory: $POOL_MEMORY_REQUEST
+  workerImage: $WI
+POOL
+}
+WORKER_NODES=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}')
+POOLS="$RUN_DIR/gym-workerpools.yaml"; : > "$POOLS"; n_pools=0
+if [ -n "$WORKER_NODES" ]; then
+  for n in $WORKER_NODES; do n_pools=$((n_pools + 1)); render_pool "gym-workerpool-$n_pools" "$n" >> "$POOLS"; echo "---" >> "$POOLS"; done
+  echo "gym pools: $n_pools, one per worker node, $POOL_REPLICAS workers each"
+else
+  render_pool gym-workerpool >> "$POOLS"; n_pools=1
+fi
+kubectl apply -f "$POOLS" >/dev/null || fail GYM_POOL
+WANT=$((POOL_REPLICAS * n_pools))
+active_workers() { [ "$(kubectl ate get workers 2>/dev/null | awk '$2 ~ /^gym-workerpool/ && $3=="WORKER_STATE_ACTIVE"' | wc -l | tr -d ' ')" -ge "$WANT" ]; }
+wait_for 600 "gym workers" active_workers || { kubectl get pods -n ate-demo-sandbox; fail GYM_POOL_WORKERS; }
+echo "gym workers active: $(kubectl ate get workers | awk '$2 ~ /^gym-workerpool/ && $3=="WORKER_STATE_ACTIVE"' | wc -l | tr -d ' ') of $WANT ($RUNTIME, cpu $POOL_CPU / $POOL_MEMORY each)"
 step "kind-up done"

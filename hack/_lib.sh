@@ -10,6 +10,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$WORK/run"; LOG_DIR="$WORK/logs"; BIN_DIR="$WORK/bin"
 ATESPACE="${ATESPACE:-nemo-gym}"
 REGISTRY="${REGISTRY:-localhost:5001}"
+# The Substrate sandbox class the pools run: gvisor (default) or microvm (needs /dev/kvm).
+RUNTIME="${RUNTIME:-gvisor}"
+case "$RUNTIME" in gvisor|microvm) ;; *) echo "RUNTIME_FAILED: $RUNTIME is not gvisor or microvm"; exit 1 ;; esac
 export PATH="$BIN_DIR:$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$BIN_DIR"
 step() { echo "== $(date -u +%FT%TZ) $*"; }

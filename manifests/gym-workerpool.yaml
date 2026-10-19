@@ -1,5 +1,7 @@
 # Eight cpu 1 / 4Gi actors per worker; templates made with WORKLOAD=gym select it.
-# Set workerImage to the install's ateom-gvisor image (docs/provider.md, Cluster).
+# Set workerImage to the install's gVisor worker image (docs/provider.md, Cluster). For the
+# micro-VM class set sandboxClasses to microvm, use that class's worker image and make the
+# memory request equal to the limit; hack/kind-up.sh renders both forms.
 apiVersion: ate.dev/v1alpha1
 kind: WorkerPool
 metadata:
