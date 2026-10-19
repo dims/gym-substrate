@@ -11,7 +11,9 @@ UID in their command lines on the kind node that runs the worker (the worker ima
 the node container is asked through docker). Steps: idle; after a page-cache fill (every regular file under 64 MiB
 read once, bounded by FILL_TIMEOUT_S); after `echo 3 > drop_caches` in the guest; then one pause
 (timed, with the node-local snapshot files' sizes) and one resume (timed, the first exec after it).
-Needs kubectl against the cluster. Prints a table and ends with RESULT PASS when every step ran.
+Needs kubectl against the cluster and docker on the kind host; POOL_NAMESPACE (default
+ate-demo-sandbox) is where the worker pods live. Prints a table and ends with RESULT PASS when
+every step ran.
 """
 
 import asyncio
@@ -43,11 +45,15 @@ async def actor_info(provider, handle) -> tuple[str, str, str]:
     return actor.metadata.uid, state, pod
 
 
+POOL_NAMESPACE = os.environ.get("POOL_NAMESPACE", "ate-demo-sandbox")
+
+
 def node_of(pod: str) -> str:
-    """The kind node container that runs the worker pod (empty when unknown)."""
-    if not pod or "/" not in pod:
+    """The kind node container that runs the worker pod (empty when unknown). The actor status names
+    the pod without its namespace; the pools live in POOL_NAMESPACE unless the name carries one."""
+    if not pod:
         return ""
-    ns, name = pod.split("/", 1)
+    ns, name = pod.split("/", 1) if "/" in pod else (POOL_NAMESPACE, pod)
     return sh(["kubectl", "-n", ns, "get", "pod", name, "-o", "jsonpath={.spec.nodeName}"]).strip()
 
 
