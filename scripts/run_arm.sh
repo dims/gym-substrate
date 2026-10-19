@@ -33,10 +33,18 @@ LEFT=$(kubectl ate get actors -a "$ATESPACE" | awk 'NR>1' | wc -l) || { echo "ca
 [ "$LEFT" -eq 0 ] || { echo "preflight: $LEFT actors left in $ATESPACE; delete them first"; exit 1; }
 
 # Stop the earlier Gym servers by their own listen ports (the log also names
-# the replay policy's URL, so match the Uvicorn lines only), then Ray.
-grep -o "Uvicorn running on http://127.0.0.1:[0-9]*" "$LOG_DIR/gym-env.log" 2>/dev/null | grep -o "[0-9]*$" | sort -u \
-  | while read -r p; do fuser -k -n tcp "$p" >/dev/null 2>&1; done
-ray stop --force >/dev/null 2>&1; sleep 2
+# the replay policy's URL, so match the Uvicorn lines only), then Ray. Then wait
+# until those ports are free: a server still shutting down makes the next
+# `gym env start` die with EADDRINUSE on its own port.
+PORTS=$(grep -o "Uvicorn running on http://127.0.0.1:[0-9]*" "$LOG_DIR/gym-env.log" 2>/dev/null | grep -o "[0-9]*$" | sort -u)
+for p in $PORTS; do fuser -k -n tcp "$p" >/dev/null 2>&1; done
+ray stop --force >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  busy=0; for p in $PORTS; do ss -ltnH "sport = :$p" 2>/dev/null | grep -q . && busy=1; done
+  [ "$busy" -eq 0 ] && break; sleep 1
+done
+[ "$busy" -eq 0 ] || { echo "earlier Gym servers still hold their ports after 30 s: $(for p in $PORTS; do ss -ltnH "sport = :$p" 2>/dev/null | grep -q . && printf '%s ' "$p"; done)"; exit 1; }
+sleep 2
 SERVER_LOG="$LOG_DIR/gym-env-$NAME.log"
 : > "$SERVER_LOG"; ln -sf "$SERVER_LOG" "$LOG_DIR/gym-env.log"
 CONFIGS="$AGENT_CFG,$CFG,$MODEL_CFG${EXTRA_CONFIGS:+,$EXTRA_CONFIGS}"
