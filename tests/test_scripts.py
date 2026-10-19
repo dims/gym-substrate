@@ -60,9 +60,11 @@ def test_delete_actors_refuses_an_unscoped_call() -> None:
 @pytest.mark.parametrize(
     "state,locality,durable,expected",
     [
+        # A pause keeps the checkpoint on the node; its durable copy may already be there too.
         ("SUSPENDED", "node-1", False, (True, False)),
-        ("SUSPENDED", "node-1", True, (False, True)),
+        ("SUSPENDED", "node-1", True, (True, True)),
         ("SUSPENDED", "", False, (False, False)),
+        ("SUSPENDED", "", True, (False, True)),
         ("RUNNING", "node-1", False, (False, False)),
     ],
 )
