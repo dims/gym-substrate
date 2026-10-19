@@ -8,8 +8,11 @@ Creates one sandbox (suspend policy never) and reads, at each step, the guest's 
 (`free -m`, `df /`) and the host's: the resident size of the sandbox's processes on its worker pod
 (for the micro-VM class the VMM and virtiofsd; for gVisor the runsc sandbox), found by the actor's
 UID in their command lines on the kind node that runs the worker (the worker image has no shell, so
-the node container is asked through docker). Steps: idle; after a page-cache fill (every regular file under 64 MiB
-read once, bounded by FILL_TIMEOUT_S); after `echo 3 > drop_caches` in the guest; then one pause
+the node container is asked through docker): the proportional set size summed over them, so the
+guest RAM that the VMM and virtiofsd both map counts once, plus each one's own resident size.
+Steps: idle; after a page-cache fill (every regular file under 64 MiB
+read once, bounded by FILL_TIMEOUT_S); after `echo 3 > drop_caches` in the guest; SETTLE_S later
+(free page reporting returns freed guest pages to the host over time); then one pause
 (timed, with the node-local snapshot files' sizes) and one resume (timed, the first exec after it).
 Needs kubectl against the cluster and docker on the kind host; POOL_NAMESPACE (default
 ate-demo-sandbox) is where the worker pods live. Prints a table and ends with RESULT PASS when
@@ -31,6 +34,7 @@ from gym_substrate._ateapi import ateapi_pb2
 IMAGE = sys.argv[1] if len(sys.argv) > 1 else "python:3.12-slim"
 ATESPACE = os.environ.get("ATESPACE", "nemo-gym")
 FILL_TIMEOUT_S = float(os.environ.get("FILL_TIMEOUT_S", "600"))
+SETTLE_S = float(os.environ.get("SETTLE_S", "60"))
 GUEST_VIEW = 'free -m | awk \'NR==2 {print "guest_total_mb=" $2, "used_mb=" $3, "cache_mb=" $6, "avail_mb=" $7}\'; df -m / | awk \'NR==2 {print "rootfs_used_mb=" $3}\''
 
 
@@ -57,17 +61,23 @@ def node_of(pod: str) -> str:
     return sh(["kubectl", "-n", ns, "get", "pod", name, "-o", "jsonpath={.spec.nodeName}"]).strip()
 
 
-def host_rss_kb(node: str, uid: str) -> tuple[int, int]:
-    """Resident KiB of the processes whose command line names the actor UID, on the node, and their count."""
+def host_memory(node: str, uid: str) -> str:
+    """The host memory of the processes whose command line names the actor UID, on the node: the
+    proportional set size summed (shared mappings such as the guest RAM counted once) and each
+    process's own resident size by name."""
     if not node:
-        return 0, 0
+        return "host_pss_mb=? procs=0"
     script = (
         "for p in /proc/[0-9]*; do if tr '\\0' ' ' < $p/cmdline 2>/dev/null | grep -q " + uid + "; then "
-        "awk '/^VmRSS/ {print $2}' $p/status; fi; done"
+        "n=$(tr '\\0' ' ' < $p/cmdline | awk '{print $1}' | xargs -r basename); "
+        "pss=$(awk '/^Pss:/ {print $2}' $p/smaps_rollup 2>/dev/null); rss=$(awk '/^VmRSS/ {print $2}' $p/status); "
+        'echo "$n $pss $rss"; fi; done'
     )
     out = sh(["docker", "exec", node, "sh", "-c", script])
-    rows = [int(x) for x in out.split() if x.isdigit()]
-    return sum(rows), len(rows)
+    rows = [line.split() for line in out.splitlines() if len(line.split()) == 3]
+    pss = sum(int(r[1]) for r in rows if r[1].isdigit())
+    per = " ".join(f"{r[0]}_rss_mb={int(r[2]) // 1024}" for r in rows if r[2].isdigit())
+    return f"host_pss_mb={pss // 1024} procs={len(rows)} {per}"
 
 
 def snapshot_files_kb(node: str, uid: str) -> str:
@@ -107,11 +117,8 @@ async def main() -> int:
         nonlocal failures
         t = time.monotonic()
         r = await provider.exec(handle, cmd, timeout_s=timeout_s)
-        kb, n = host_rss_kb(node, uid)
         guest = " ".join((r.stdout or "").split())
-        print(
-            f"{label:9s} {time.monotonic() - t:6.1f}s  rc={r.return_code} host_rss_mb={kb // 1024} procs={n} {guest}"
-        )
+        print(f"{label:9s} {time.monotonic() - t:6.1f}s  rc={r.return_code} {host_memory(node, uid)} {guest}")
         failures += r.return_code != 0
 
     await row("idle", GUEST_VIEW)
@@ -121,6 +128,9 @@ async def main() -> int:
         FILL_TIMEOUT_S,
     )
     await row("dropped", f"sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null; {GUEST_VIEW}")
+    # Free page reporting hands freed guest pages back to the host over time, not at once.
+    await asyncio.sleep(SETTLE_S)
+    await row("settled", GUEST_VIEW)
 
     t = time.monotonic()
     await provider.pause(handle)
@@ -131,9 +141,8 @@ async def main() -> int:
     t = time.monotonic()
     r = await provider.exec(handle, GUEST_VIEW, timeout_s=600)
     uid, state, pod_after = await actor_info(provider, handle)
-    kb, n = host_rss_kb(node_of(pod_after) or node, uid)
     print(
-        f"resume    {time.monotonic() - t:6.1f}s  rc={r.return_code} state={state} host_rss_mb={kb // 1024} procs={n} {' '.join((r.stdout or '').split())}"
+        f"resume    {time.monotonic() - t:6.1f}s  rc={r.return_code} state={state} {host_memory(node_of(pod_after) or node, uid)} {' '.join((r.stdout or '').split())}"
     )
     failures += r.return_code != 0
 
