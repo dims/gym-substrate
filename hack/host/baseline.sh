@@ -4,7 +4,8 @@
 #
 # The state of a borrowed host before anything is changed on it, as the OS user. Prints it, and
 # with --save keeps the parts the revert and the wipe compare against under
-# ~/.gym-substrate-host/baseline (home listing, packages, sysctls, groups, a timestamp).
+# ~/.gym-substrate-host/baseline (home listing, packages, sysctls, groups, the mode of /dev/kvm,
+# a timestamp).
 #   hack/host/baseline.sh [--save]
 set -u
 B="$HOME/.gym-substrate-host/baseline"
@@ -30,5 +31,6 @@ if [ "${1:-}" = --save ]; then
   dpkg-query -W -f '${Package}\n' 2>/dev/null | sort > "$B/pkgs.txt"
   for k in $KEYS; do printf '%s=%s\n' "$k" "$(sysctl -n "$k" 2>/dev/null | tr '\t' ' ')"; done > "$B/sysctl.txt"
   id -Gn > "$B/groups.txt"
+  [ -e /dev/kvm ] && stat -c '%a %U %G' /dev/kvm > "$B/kvm.txt"
   echo "baseline saved under $B ($(wc -l < "$B/home.txt") home entries, $(wc -l < "$B/pkgs.txt") packages)"
 fi

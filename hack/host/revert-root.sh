@@ -4,7 +4,8 @@
 #
 # Undo hack/host/prep-root.sh on a borrowed host, after hack/host/wipe.sh wipe: the files it wrote,
 # the running sysctl values (back to what prep-root recorded), the packages it added (by name from
-# its before/after lists, never autoremove), docker's state and group, the sshd priority.
+# its before/after lists, never autoremove), docker's state and group, the sshd priority, the mode of
+# /dev/kvm (back to the baseline's).
 #   sudo hack/host/revert-root.sh [USER] [keep-docker]
 set -u
 export DEBIAN_FRONTEND=noninteractive
@@ -36,6 +37,16 @@ if [ -s "$P/pkgs-before.txt" ] && [ -s "$P/pkgs-after.txt" ]; then
     if apt-get purge -y -qq $added >> "$P/apt-purge.log" 2>&1; then echo "purged: $added"; else echo "purge of added packages FAILED"; tail -3 "$P/apt-purge.log"; fi
   else echo "no other packages to purge"; fi
 fi
+# Substrate's hack/create-kind-cluster.sh bind-mounts the host's /dev/kvm into every kind node and
+# runs chmod 666 on it there; a bind mount shares the inode, so the host's device stays world
+# writable after the cluster is gone. Back to what baseline.sh --save recorded.
+B="$H/.gym-substrate-host/baseline"
+if [ -e /dev/kvm ] && [ -s "$B/kvm.txt" ]; then
+  read -r mode user group < "$B/kvm.txt"
+  if [ "$(stat -c '%a %U %G' /dev/kvm)" = "$mode $user $group" ]; then echo "/dev/kvm still $mode $user:$group"
+  elif chmod "$mode" /dev/kvm && chown "$user:$group" /dev/kvm; then echo "/dev/kvm back to $mode $user:$group"
+  else echo "/dev/kvm restore FAILED: $(stat -c '%a %U:%G' /dev/kvm)"; fi
+elif [ -e /dev/kvm ]; then echo "/dev/kvm $(stat -c '%a %U:%G' /dev/kvm); no baseline record to compare"; fi
 systemctl set-property --runtime ssh.service CPUWeight=100 MemoryLow=0 2>/dev/null && echo "ssh.service CPUWeight/MemoryLow reset"
 echo "packages now: $(dpkg-query -W -f '${db:Status-Abbrev}\n' | grep -c '^ii') installed"
 echo "== $(date -u +%FT%TZ) revert-root done"

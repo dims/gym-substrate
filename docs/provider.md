@@ -386,13 +386,14 @@ follow with a comparison.
 ### A borrowed host
 
 `hack/host/` prepares and hands back a host that is not ours to keep: `baseline.sh --save` records
-the home directory, the packages and the sysctls before any change; `sudo prep-root.sh` installs
+the home directory, the packages, the sysctls and the mode of `/dev/kvm` before any change; `sudo prep-root.sh` installs
 docker and the few packages the scripts need, puts the OS user in the docker group and raises the
 kernel and docker limits (recorded for the revert); `install-tools.sh` puts Go, kubectl, kind, ko
 and uv under the user's home; `sudo sshd-priority.sh` keeps sshd responsive under load. At the end
 `wipe.sh plan`, then `wipe.sh wipe` (our processes, the kind cluster, everything the baseline did
 not have), then `sudo revert-root.sh` (the files, the sysctls and the packages prep-root added, by
-name and never autoremove), and `~/.ssh` by hand last.
+name and never autoremove, and the mode of `/dev/kvm`, which Substrate's kind script widens on the
+host through the node's bind mount), and `~/.ssh` by hand last.
 
 ### Probes
 
