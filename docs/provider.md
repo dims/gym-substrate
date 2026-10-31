@@ -36,7 +36,7 @@ image, which runs untouched, and sets it as the container command.
 
 ## Requirements
 
-**NeMo Gym.** Upstream `main` plus these pull requests until they merge:
+**NeMo Gym.** Upstream `main`; these pull requests are on it since 2026-10-15:
 
 - [NVIDIA-NeMo/Gym#4483](https://github.com/NVIDIA-NeMo/Gym/pull/4483): `openai_utils` drops litellm's `provider_specific_fields` from replayed chat history. Without it every `mini_swe_agent_2` rollout fails with a 422 on its second turn.
 - [#4472](https://github.com/NVIDIA-NeMo/Gym/pull/4472): `mini_swe_agent_2` ends a rollout when its sandbox is gone or an exec does not run (return code 125 with an `error_type`). Without it the rollout steps on against a dead sandbox and scores 0 with no error.
