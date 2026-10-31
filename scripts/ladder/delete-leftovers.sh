@@ -6,11 +6,13 @@
 # lost to its cleanup deadline leaves the actor DELETING with its slot held until a later delete
 # finds the sandbox gone. Prints the names and the before and after counts.
 #   scripts/ladder/delete-leftovers.sh
+# Environment: WORK (hack/_lib.sh), GYM_DIR (default WORK/gym, for its venv).
 set -u
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/../../hack/_lib.sh"
-EV="$RUN_DIR/events.log"
+EV="$RUN_DIR/events.log"; GYM_DIR="${GYM_DIR:-$WORK/gym}"
 names=$(kubectl ate get actors -a "$ATESPACE" 2>/dev/null | awk 'NR>1 && $4 ~ /DELETING/ {print $2}'); n=$(echo "$names" | grep -c .)
 echo "$(date -u +%FT%TZ) delete-leftovers: $n DELETING: $(echo "$names" | tr '\n' ' ' | cut -c1-200)" | tee -a "$EV"
-for a in $names; do kubectl ate delete actor "$a" -a "$ATESPACE" >/dev/null 2>&1 & done; wait; sleep 5
+[ "$n" -eq 0 ] || ATEAPI_ADDR="$(node_ip):30443" "$GYM_DIR/.venv/bin/python" "$REPO/scripts/delete_actors.py" "$ATESPACE" --state DELETING 2>&1 | tail -1
+sleep 5
 echo "$(date -u +%FT%TZ) delete-leftovers: after: $(kubectl ate get actors -a "$ATESPACE" 2>/dev/null | awk 'NR>1 {print $4}' | sed 's/ACTOR_STATE_//' | sort | uniq -c | tr -s ' \n' ' ')" | tee -a "$EV"

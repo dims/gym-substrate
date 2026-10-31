@@ -19,10 +19,10 @@
     ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --state CRASHED --state SUSPENDED
     ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --all
 
-A running, paused or mid-transition actor goes too.
-Nothing is deleted without a name, a state or --all. Do not put --all in a
-loop: it removes every live sandbox in the atespace, including the ones a run
-is using.
+A running, paused or mid-transition actor goes too. Deletes run DELETE_CONCURRENCY
+(default 32) at a time. Nothing is deleted without a name, a state or --all. Do not
+put --all in a loop: it removes every live sandbox in the atespace, including the
+ones a run is using.
 """
 
 import argparse
@@ -84,10 +84,15 @@ async def main(args) -> None:
     )
     actors = await list_actors(provider, args.atespace)
     chosen = select_actors(actors, args.names, args.state, args.all)
-    for actor in chosen:
+    gate = asyncio.Semaphore(int(os.environ.get("DELETE_CONCURRENCY", "32")))
+
+    async def delete(actor) -> None:
         ref = ateapi_pb2.ObjectRef(atespace=args.atespace, name=actor.metadata.name)
-        await provider._control("DeleteActor", ateapi_pb2.DeleteActorRequest(actor=ref))
+        async with gate:
+            await provider._control("DeleteActor", ateapi_pb2.DeleteActorRequest(actor=ref))
         print(f"deleted {actor.metadata.name} ({state_name(actor)})")
+
+    await asyncio.gather(*(delete(actor) for actor in chosen))
     await provider.aclose()
     print(f"deleted {len(chosen)} of {len(actors)} actors in {args.atespace}")
 
