@@ -9,7 +9,7 @@ set -euo pipefail
 SUBSTRATE="${1:?path to a Substrate checkout}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${ROOT}/gym_substrate/_ateapi"
-PROTO_DIR="${SUBSTRATE}/pkg/proto/ateapipb"
+PROTO_DIR="${SUBSTRATE}/api/ateapi/v1"
 
 # Generated code refuses to load under a protobuf runtime older than the protoc
 # that produced it, so this protoc must not be newer than the locked runtime.
