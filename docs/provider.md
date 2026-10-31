@@ -178,10 +178,9 @@ KO_DOCKER_REPO=<registry> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
   hack/gym-templates.sh swebench/sweb.eval.x86_64.django_1776_django-10973:latest
 ```
 
-  The script writes the location as `gs://<bucket>/<atespace>/`; Substrate reads the
-  bucket from the location's host whatever the backend. An existing template shows the
-  install's location under `snapshotConfig.storageLocation`
-  (`kubectl ate get actor-template -a ate-demo-sandbox -o yaml` after the demo).
+  Snapshots go to the install's location; a template may name its own
+  `snapshotConfig.storageLocation` only when the `PerTemplateSnapshotLocation` preview is
+  on, and ate-api-server rejects it otherwise.
 - `WORKLOAD` is the `workload` label of the pool the templates select: default `sandbox`,
   Substrate's demo pool; `gym` for `manifests/gym-workerpool.yaml`. `ACTOR_CPU` (default
   1) and `ACTOR_MEMORY` (default 1Gi) are the per-actor limits and set how many actors
