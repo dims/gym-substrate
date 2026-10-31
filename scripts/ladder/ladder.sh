@@ -102,7 +102,7 @@ ev "start $MODE; slots $SLOTS; api $ATEAPI_ADDR; restarts baseline $RESTARTS0"
 # unique_name NAME: a repeated arm gets a numbered name (NAME-r2, -r3), so its rows, logs and samples do
 # not replace the earlier sample's.
 unique_name() { local base=$1 n=$1 i=2
-  while ls "$RUN_DIR/$n"-[0-9]*.tsv "$RUN_DIR/$n.jsonl" "$RUN_DIR/$n-snaps.txt" >/dev/null 2>&1; do n="$base-r$i"; i=$((i + 1)); done; echo "$n"; }
+  while [ -n "$(ls "$RUN_DIR/$n"-[0-9]*.tsv "$RUN_DIR/$n.jsonl" "$RUN_DIR/$n-snaps.txt" 2>/dev/null)" ]; do n="$base-r$i"; i=$((i + 1)); done; echo "$n"; }
 # run_burn NAME IMAGE SHARDS STAGGER N STEPS GAP POLICY BURN ALLOC: burn_driver.py over SHARDS
 # processes of N/SHARDS sandboxes each (one gRPC channel per shard), one tsv per shard.
 run_burn() { local name image=$2 shards=$3 stagger=$4 n=$5; name=$(unique_name "$1"); shift 5
