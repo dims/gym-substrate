@@ -9,11 +9,12 @@
 #   hack/kind-up.sh
 # Environment: WORK, SUBSTRATE_DIR (default WORK/substrate), SUBSTRATE_REPO (the clone source,
 # default the upstream repository; a fork for a branch under test) and SUBSTRATE_REF (default
-# upstream/main; the remote is named upstream whatever SUBSTRATE_REPO is), RUNTIME (gvisor or microvm), GVISOR_ASSET_DIR (required on a 64 KiB-page
-# kernel with gvisor), MICROVM_ASSET_DIR (a set made by Substrate's
-# hack/microvm-assets/assemble.sh; downloaded when unset), POST_KIND_HOOK (a script run once
-# the cluster exists, for a host firewall), POOL_REPLICAS / POOL_CPU / POOL_MEMORY (default
-# 3 / 6 / 12Gi; with worker nodes, one pool of POOL_REPLICAS pinned to each worker node).
+# upstream/main; the remote is named upstream whatever SUBSTRATE_REPO is), RUNTIME (gvisor or
+# microvm), GVISOR_ASSET_DIR (required on a 64 KiB-page kernel with gvisor), MICROVM_ASSET_DIR (an
+# asset set ate-setup assembled earlier, bin/microvm-assets/<arch>/ with its .asset-versions
+# stamp, for a host without egress to GitHub; downloaded when unset), POST_KIND_HOOK (a script
+# run once the cluster exists, for a host firewall), POOL_REPLICAS / POOL_CPU / POOL_MEMORY
+# (default 3 / 6 / 12Gi; with worker nodes, one pool of POOL_REPLICAS pinned to each worker node).
 set -uo pipefail
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/_lib.sh"
@@ -89,18 +90,8 @@ fi
 step "sandbox class $RUNTIME"
 if [ "$RUNTIME" = microvm ]; then
   docker exec kind-control-plane test -e /dev/kvm || fail KVM "the kind nodes have no /dev/kvm; the cluster must be created on a host where docker can use the device"
-  if kubectl get sandboxconfig microvm >/dev/null 2>&1; then
-    echo "microvm SandboxConfig present"
-  else
-    # install-microvm-deps.sh assembles the asset set into OUT unless a current one is there,
-    # stages it into the install's rustfs bucket and applies the SandboxConfig.
-    HOST_ARCH=$(arch)
-    (
-      export ATE_INSTALL_KIND=true NO_DEV_ENV=true KUBECTL_CONTEXT=kind-kind BUCKET_NAME="${BUCKET_NAME:-ate-snapshots}" ARCH="$HOST_ARCH"
-      [ -z "${MICROVM_ASSET_DIR:-}" ] || export OUT="$MICROVM_ASSET_DIR"
-      hack/install-microvm-deps.sh --install
-    ) > "$LOG_DIR/microvm-deps.log" 2>&1 || { tail -15 "$LOG_DIR/microvm-deps.log"; fail MICROVM_DEPS; }
-  fi
+  # deploy ate-system --sandbox-classes=microvm staged the assets and applied the SandboxConfig.
+  kubectl get sandboxconfig microvm >/dev/null 2>&1 || fail MICROVM_SANDBOXCONFIG "no SandboxConfig microvm after the install; see $LOG_DIR/install.log"
   echo "microvm SandboxConfig version $(kubectl get sandboxconfig microvm -o jsonpath='{.spec.defaultVersion}'), $(arch) assets; kvm nodes: $(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}={.status.capacity.ate\.dev/kvm} {end}')"
 elif [ "$(getconf PAGESIZE)" = 65536 ]; then
   [ -n "${GVISOR_ASSET_DIR:-}" ] || fail GVISOR_ASSET "64 KiB pages: set GVISOR_ASSET_DIR to a runsc build made with --define=pagesize=64k (gvisor.tar.zstd and its .sha256)"
@@ -145,13 +136,13 @@ if [ "$RUNTIME" = microvm ]; then
 elif kubectl get workerpool -n ate-demo-sandbox sandbox-workerpool >/dev/null 2>&1; then
   echo "demo sandbox present"
 else
-  hack/install-ate-kind.sh --deploy-demo-sandbox > "$LOG_DIR/demo-sandbox.log" 2>&1 || { tail -10 "$LOG_DIR/demo-sandbox.log"; fail DEMO_SANDBOX; }
+  go run ./cmd/ate-setup --kind deploy demo sandbox > "$LOG_DIR/demo-sandbox.log" 2>&1 || { tail -10 "$LOG_DIR/demo-sandbox.log"; fail DEMO_SANDBOX; }
 fi
 if [ "$RUNTIME" = microvm ]; then
   if kubectl get workerpool -n ate-demo-counter-microvm counter-microvm >/dev/null 2>&1; then
     echo "demo counter-microvm present"
   else
-    hack/install-ate-kind.sh --deploy-demo-counter-microvm > "$LOG_DIR/demo-counter-microvm.log" 2>&1 || { tail -15 "$LOG_DIR/demo-counter-microvm.log"; fail DEMO_COUNTER_MICROVM; }
+    go run ./cmd/ate-setup --kind deploy demo counter-microvm > "$LOG_DIR/demo-counter-microvm.log" 2>&1 || { tail -15 "$LOG_DIR/demo-counter-microvm.log"; fail DEMO_COUNTER_MICROVM; }
     echo "demo counter-microvm golden: $(kubectl ate get actor-templates -a ate-demo-counter-microvm 2>/dev/null | awk 'NR>1 {print $3}' | head -1)"
   fi
   WI=$(kubectl get workerpool -n ate-demo-counter-microvm counter-microvm -o jsonpath='{.spec.workerImage}')
@@ -166,7 +157,7 @@ fi
 if [ "$RUNTIME" = microvm ]; then POOL_MEMORY_REQUEST="$POOL_MEMORY"; else POOL_MEMORY_REQUEST="${POOL_MEMORY_REQUEST:-$POOL_MEMORY}"; fi
 render_pool() { # render_pool NAME [NODE]
   cat <<POOL
-apiVersion: ate.dev/v1alpha1
+apiVersion: ate.dev/v1
 kind: WorkerPool
 metadata:
   name: $1

@@ -105,7 +105,7 @@ its template's cpu and memory limits from the worker's limits; requests are not 
 A slot is one actor of the template's size, so a worker of cpu 8 / 32 GiB holds eight
 actors of cpu 1 / 4 GiB. SWE-bench test suites peak at 2 to 4 GiB.
 `manifests/gym-workerpool.yaml` is such a pool in the demo's namespace, so deploy the demo
-first (`hack/install-ate-kind.sh --deploy-demo-sandbox` on kind); its pool shows the
+first (`go run ./cmd/ate-setup --kind deploy demo sandbox` on kind); its pool shows the
 install's `ateom-gvisor` image, which fills the placeholder:
 
 ```bash
@@ -358,12 +358,12 @@ cpu 1 / 4Gi actors; when the kind cluster has worker nodes, one pool of `POOL_RE
 pinned to each of them, since a paused actor resumes on its own node); `RUNTIME`, the
 sandbox class of the pools: `gvisor` (default) or `microvm` (Substrate's Cloud Hypervisor
 class: the host needs `/dev/kvm`, `hack/kind-up.sh` installs the micro-VM assets and
-SandboxConfig through Substrate's `hack/install-microvm-deps.sh`, deploys the
+SandboxConfig through `ate-setup deploy ate-system --sandbox-classes=microvm`, deploys the
 counter-microvm demo for the class's worker image, and gives each worker a memory request
 equal to its limit; an actor's guest gets its memory limit minus 128 MiB, so `ACTOR_MEMORY`
-below 256Mi is rejected); `MICROVM_ASSET_DIR`, a set made by Substrate's
-`hack/microvm-assets/assemble.sh` for a host without egress to GitHub (downloaded when
-unset); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel with the gvisor class (a
+below 256Mi is rejected); `MICROVM_ASSET_DIR`, an asset set `ate-setup` assembled earlier
+(`bin/microvm-assets/<arch>/` with its `.asset-versions` stamp) for a host without egress to
+GitHub (downloaded when unset); `GVISOR_ASSET_DIR`, required on a 64 KiB-page kernel with the gvisor class (a
 `gvisor.tar.zstd` built with `--define=pagesize=64k` and its `.sha256`, uploaded by
 `hack/gvisor-asset.sh`); `IMAGE_TARBALLS`, a directory of zstd-compressed `docker save`
 tarballs for an image that is not public, such as the arm64 sklearn image. When
