@@ -27,7 +27,8 @@
 # Stop rules, checked every 15 s inside an arm and once after it: CRASHED actors above 1 % of N;
 # any ate-system restart; a node not Ready for over STOP_NOTREADY_S (60); host memory used above
 # STOP_MEM_USED_GIB (default 90 % of the total); free space under docker's data root below
-# STOP_DISK_FREE_GB (300). A breach ends the arm: its processes are killed and the rule is logged.
+# STOP_DISK_FREE_GB (default 10 % of that filesystem). A breach ends the arm: its processes are
+# killed and the rule is logged.
 # After each arm: the actor list, the api-server log and the previous log of every restarted gym
 # worker go to the ladder dir, and on the microvm class the restore phases of the arm.
 set -u
@@ -61,8 +62,9 @@ promdump() { [ -n "$PROM_URL" ] || return 0
   else rm -f "$OUT/prom-$1.json"; echo "prom dump $1: $PROM_URL did not answer"; fi; }
 RESTARTS0=$(restarts)
 STOP_MEM_USED_GIB="${STOP_MEM_USED_GIB:-$(( $(free -g | awk '/^Mem:/{print $2}') * 90 / 100 ))}"
-STOP_DISK_FREE_GB="${STOP_DISK_FREE_GB:-300}"; STOP_NOTREADY_S="${STOP_NOTREADY_S:-60}"
+STOP_NOTREADY_S="${STOP_NOTREADY_S:-60}"
 DOCKER_ROOT=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+STOP_DISK_FREE_GB="${STOP_DISK_FREE_GB:-$(( $(df -BG --output=size "$DOCKER_ROOT" 2>/dev/null | tail -1 | tr -dc 0-9) / 10 ))}"
 NOTREADY_SINCE=0; RULES=/dev/null
 # rule_breach N: one sample line into RULES, then the broken rule on stdout, or nothing.
 rule_breach() { local n=$1 crashed r m d nr now
