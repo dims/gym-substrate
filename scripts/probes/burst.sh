@@ -12,7 +12,8 @@ set -u
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/../../hack/_lib.sh"
 N=${1:-64}; STEPS=${2:-3}; GAP=${3:-30}
-GYM_DIR="${GYM_DIR:-$WORK/gym}"; IMAGE="${IMAGE:-$REGISTRY/burn-xs:3.12-slim}"; LD="$(cd "$(dirname "$0")/../ladder" && pwd)"
+GYM_DIR="${GYM_DIR:-$WORK/gym}"; IMAGE="${IMAGE:-$REGISTRY/burn-xs:3.12-slim}"
+PD="$(cd "$(dirname "$0")" && pwd)"; LD="$(cd "$PD/../ladder" && pwd)"
 NODE_IP=$(node_ip); [ -n "$NODE_IP" ] || fail NODE_IP "no $RUN_DIR/node-ip"
 export ATEAPI_ADDR="$NODE_IP:30443" ATENET_ADDR="$NODE_IP:30080" ATESPACE RUN_DIR
 cd "$GYM_DIR" || fail GYM_DIR "$GYM_DIR"
@@ -22,7 +23,7 @@ TPL=$(python3 -c "import sys; from gym_substrate.provider import template_name_f
 kubectl ate get actor-template "$TPL" -a "$ATESPACE" >/dev/null 2>&1 || fail TEMPLATE "no template $TPL for $IMAGE; run scripts/ladder/ladder-templates.sh first"
 [ "$(actors_left)" -eq 0 ] || fail ACTORS_LEFT "$(actors_left) actors in $ATESPACE"
 STAMP=$(date -u +%H%M%S); COUNTS="$RUN_DIR/host-counts-burst-$STAMP.txt"
-bash "$(dirname "$0")/host-counts.sh" "$COUNTS" 5 & SAMPLER=$!
+bash "$PD/host-counts.sh" "$COUNTS" 5 & SAMPLER=$!
 step "burst: $N x $IMAGE, $STEPS x 3 s burns, gap $GAP s, pause_after_exec"
 IMAGE=$IMAGE OUT="$RUN_DIR/burst-$STAMP.tsv" STAGGER_S=0.1 EXEC_CONCURRENCY=8192 PROBE_TIMEOUT_S=660 \
   timeout 3600 python3 -u "$LD/burn_driver.py" "$N" "$STEPS" "$GAP" pause_after_exec 3 0.1 2>&1 | tee "$LOG_DIR/burst-$STAMP.log" | grep -E '^(phase|create|exec|close|policy=|RESULT|STEP-FAILED|ERROR)' | cut -c1-220

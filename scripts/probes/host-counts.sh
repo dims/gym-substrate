@@ -12,7 +12,7 @@ mkdir -p "$(dirname "$OUT")"
 echo "# $(date -u +%FT%TZ) host-counts start interval=${IV}s pid_max=$(sysctl -n kernel.pid_max) threads-max=$(sysctl -n kernel.threads-max) file-max=$(sysctl -n fs.file-max) inotify-instances-max=$(sysctl -n fs.inotify.max_user_instances)" >> "$OUT"
 while :; do
   procs=$(find /proc -maxdepth 1 -regex '/proc/[0-9]+' 2>/dev/null | wc -l)
-  threads=$(awk '{print $2}' /proc/loadavg | cut -d/ -f2)
+  threads=$(awk '{print $4}' /proc/loadavg | cut -d/ -f2)
   fds=$(awk '{print $1}' /proc/sys/fs/file-nr)
   inotify=$(find /proc/[0-9]*/fd -lname 'anon_inode:inotify' 2>/dev/null | wc -l)
   taps=$(ip -o link 2>/dev/null | grep -c -E ': tap|: vmtap' || true)
