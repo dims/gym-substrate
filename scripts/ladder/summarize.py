@@ -216,8 +216,9 @@ def gym_row(arm: str, ev: dict, d: Path, samples) -> list[str]:
 def summarize(d: Path) -> list[list[str]]:
     arms = parse_events(event_files(d))
     for base in (d, d.parent):  # burn arms with rows but no events
-        for f in base.glob("*-[0-9].tsv"):
-            arms.setdefault(f.name.rsplit("-", 1)[0], {"kind": "burn", "shards": [], "results": [], "stops": []})
+        for f in base.glob("*-[0-9]*.tsv"):
+            if f.name.rsplit("-", 1)[1].removesuffix(".tsv").isdigit():
+                arms.setdefault(f.name.rsplit("-", 1)[0], {"kind": "burn", "shards": [], "results": [], "stops": []})
     samples = []
     if hs := find(d, "host-samples.txt"):
         samples = [(stamp(m.group(1)), int(m.group(3))) for ln in hs.read_text().splitlines() if (m := HOST.match(ln))]

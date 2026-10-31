@@ -96,7 +96,8 @@ because the grace period is not raised:
 kubectl -n ate-system patch deploy atenet-router --type=json -p='[
   {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--route-timeout=30m30s"},
   {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--parked-request-budget=10m"},
-  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--extproc-max-requests=8192"}]'
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--extproc-max-requests=8192"},
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--parked-request-max=4096"}]'
 kubectl -n ate-system rollout status deploy/atenet-router
 ```
 

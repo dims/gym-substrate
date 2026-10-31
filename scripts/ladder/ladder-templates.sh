@@ -4,7 +4,7 @@
 #
 # What the ladder needs beyond hack/rerun-all.sh: the four burn tags (python:3.12-slim under
 # names that give one template per size), their templates with golden snapshots, and the
-# saturation provider configs: exec concurrency 1000, idle 3 s before a pause, and the never
+# saturation provider configs: exec concurrency 4096, idle 3 s before a pause, and the never
 # variant; plus the agent-server concurrency overlay.
 #   scripts/ladder/ladder-templates.sh
 # Environment: WORK (hack/_lib.sh), REGISTRY, ATESPACE, BUCKET_NAME (default ate-snapshots).
@@ -36,8 +36,8 @@ for spec in "burn 1 4Gi" "burn-s 500m 2Gi" "burn-xs 250m 1Gi" "burn-xxs 125m 512
 done
 step "saturation configs"
 [ -s "$RUN_DIR/substrate.yaml" ] || fail CONFIG "no $RUN_DIR/substrate.yaml; hack/gym-checkout.sh writes it"
-sed -E -e 's/concurrency: [0-9]+$/concurrency: 1000/' -e 's/idle_before_suspend_s: .*/idle_before_suspend_s: 3.0/' "$RUN_DIR/substrate.yaml" > "$RUN_DIR/substrate-sat.yaml"
+sed -E -e 's/concurrency: [0-9]+$/concurrency: 4096/' -e 's/idle_before_suspend_s: .*/idle_before_suspend_s: 3.0/' "$RUN_DIR/substrate.yaml" > "$RUN_DIR/substrate-sat.yaml"
 sed -E 's/suspend_policy: .*/suspend_policy: never/' "$RUN_DIR/substrate-sat.yaml" > "$RUN_DIR/substrate-never-sat.yaml"
-printf 'mini_swe_agent_2:\n  responses_api_agents:\n    mini_swe_agent_2:\n      concurrency: 1000\n' > "$RUN_DIR/ladder-agent.yaml"
+printf 'mini_swe_agent_2:\n  responses_api_agents:\n    mini_swe_agent_2:\n      concurrency: 4096\n' > "$RUN_DIR/ladder-agent.yaml"
 echo "configs: $(grep -E 'ateapi_addr|suspend_policy|concurrency|idle_before|timeout_s: 660' "$RUN_DIR/substrate-sat.yaml" | tr -s ' ' | tr '\n' ';')"
 step "ladder-templates done"

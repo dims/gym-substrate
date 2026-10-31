@@ -105,7 +105,7 @@ step "router"
 if kubectl -n ate-system get deploy atenet-router -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q -- "--parked-request-budget"; then
   echo "router args present"
 else
-  kubectl -n ate-system patch deploy atenet-router --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--route-timeout=30m30s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--parked-request-budget=10m"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--extproc-max-requests=8192"}]' >/dev/null || fail ROUTER_PATCH
+  kubectl -n ate-system patch deploy atenet-router --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--route-timeout=30m30s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--parked-request-budget=10m"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--extproc-max-requests=8192"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--parked-request-max=4096"}]' >/dev/null || fail ROUTER_PATCH
   kubectl -n ate-system rollout status deploy/atenet-router --timeout=300s >/dev/null || fail ROUTER_ROLLOUT
 fi
 echo "router args: $(kubectl -n ate-system get deploy atenet-router -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n' | grep -E 'route-timeout|parked|extproc' | tr -d '"[]' | tr '\n' ' ')"
