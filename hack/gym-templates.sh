@@ -21,9 +21,10 @@
 #
 #   ATESPACE        templates go here (default nemo-gym); created if missing
 #   WORKLOAD        WorkerPool label the templates select (default sandbox)
-#   ACTOR_CPU       cpu limit per actor (default 1); with ACTOR_MEMORY this
-#   ACTOR_MEMORY    memory limit per actor (default 1Gi); sets how many
-#                   actors share one worker, so size both against the pool
+#   ACTOR_CPU       cpu limit per actor (default 1): whole cores or Nm; with
+#   ACTOR_MEMORY    memory limit per actor (default 1Gi: Ki, Mi, Gi, Ti or
+#                   bytes); the two set how many actors share one worker, so
+#                   size both against the pool
 #   AGENT_IMAGE     digest-pinned sandbox server image (default: ko build,
 #                   which needs KO_DOCKER_REPO)
 #   WAIT_GOLDEN     set to wait until every template named here has a golden
@@ -41,6 +42,16 @@ ATESPACE="${ATESPACE:-nemo-gym}"
 WORKLOAD="${WORKLOAD:-sandbox}"
 ACTOR_CPU="${ACTOR_CPU:-1}"
 ACTOR_MEMORY="${ACTOR_MEMORY:-1Gi}"
+
+# The template takes integer millicores and bytes.
+millicores() { case "$1" in *m) echo "${1%m}" ;; *) echo "$(( $1 * 1000 ))" ;; esac; }
+bytes() {
+  local n="${1%??}"
+  case "$1" in
+    *Ki) echo "$(( n << 10 ))" ;; *Mi) echo "$(( n << 20 ))" ;; *Gi) echo "$(( n << 30 ))" ;; *Ti) echo "$(( n << 40 ))" ;;
+    *) echo "$1" ;;
+  esac
+}
 
 # This module has no go-containerregistry dependency, so the version is pinned here.
 CRANE_VERSION="${CRANE_VERSION:-v0.21.7}"
@@ -103,10 +114,8 @@ volumes:
     reference: ${AGENT_IMAGE}
 resources:
   limits:
-  - name: cpu
-    quantity: "${ACTOR_CPU}"
-  - name: memory
-    quantity: ${ACTOR_MEMORY}
+    cpuMillicores: $(millicores "${ACTOR_CPU}")
+    memoryBytes: $(bytes "${ACTOR_MEMORY}")
 snapshotConfig:
   preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
   storageLocation: gs://${BUCKET_NAME}/${ATESPACE}/
