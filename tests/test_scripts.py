@@ -74,6 +74,6 @@ def test_smoke_distinguishes_local_pause_from_durable_suspend(state, locality, d
     actor.status.snapshots.add(generation=1, locality="older-node")
     latest = actor.status.snapshots.add(generation=2, locality=locality)
     if durable:
-        latest.durable_snapshot.status = ateapi_pb2.SNAPSHOT_STORAGE_STATUS_COMPLETED
+        latest.durable_snapshot.state = ateapi_pb2.SNAPSHOT_STORAGE_STATE_COMPLETED
     assert smoke.is_parked(actor, "pause_after_exec") == expected[0]
     assert smoke.is_parked(actor, "after_exec") == expected[1]

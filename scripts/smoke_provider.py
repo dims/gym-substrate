@@ -59,7 +59,7 @@ def is_parked(actor, policy: str) -> bool:
         return bool(latest.locality)
     return (
         latest.HasField("durable_snapshot")
-        and latest.durable_snapshot.status == ateapi_pb2.SNAPSHOT_STORAGE_STATUS_COMPLETED
+        and latest.durable_snapshot.state == ateapi_pb2.SNAPSHOT_STORAGE_STATE_COMPLETED
     )
 
 

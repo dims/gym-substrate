@@ -19,7 +19,7 @@
     ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --state CRASHED --state SUSPENDED
     ATEAPI_ADDR=localhost:8080 python scripts/delete_actors.py ATESPACE --all
 
-Deletes with any_state, so a running, paused or mid-transition actor goes too.
+A running, paused or mid-transition actor goes too.
 Nothing is deleted without a name, a state or --all. Do not put --all in a
 loop: it removes every live sandbox in the atespace, including the ones a run
 is using.
@@ -86,7 +86,7 @@ async def main(args) -> None:
     chosen = select_actors(actors, args.names, args.state, args.all)
     for actor in chosen:
         ref = ateapi_pb2.ObjectRef(atespace=args.atespace, name=actor.metadata.name)
-        await provider._control("DeleteActor", ateapi_pb2.DeleteActorRequest(actor=ref, any_state=True))
+        await provider._control("DeleteActor", ateapi_pb2.DeleteActorRequest(actor=ref))
         print(f"deleted {actor.metadata.name} ({state_name(actor)})")
     await provider.aclose()
     print(f"deleted {len(chosen)} of {len(actors)} actors in {args.atespace}")

@@ -21,7 +21,7 @@ pids=$(ps -eo pid,args | grep -E "$PAT" | awk '{print $1}')
 echo "left: $(ps -eo args | grep -c -E "$PAT")"
 if [ -n "$TPL" ]; then
   names=$(kubectl ate get actors -a "$ATESPACE" 2>/dev/null | awk -v t="$TPL" 'NR>1 && $3 ~ t {print $2}'); n=$(echo "$names" | grep -c .)
-  echo "actors of $TPL: $n"; for a in $names; do kubectl ate delete actor "$a" -a "$ATESPACE" --any-state >/dev/null 2>&1 & done; wait
+  echo "actors of $TPL: $n"; for a in $names; do kubectl ate delete actor "$a" -a "$ATESPACE" >/dev/null 2>&1 & done; wait
 fi
 echo "actors left in $ATESPACE: $(actors_left)" | tee -a "$EV"
 echo "$(date -u +%FT%TZ) pause-chain: done" | tee -a "$EV"

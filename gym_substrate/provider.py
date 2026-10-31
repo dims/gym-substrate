@@ -1060,13 +1060,10 @@ class SubstrateProvider:
                         LOGGER.warning("substrate: suspending %s on close: %s", actor.name, e.details())
                 return
 
-            # any_state removes a running, paused or mid-transition actor
-            # outright; nothing about a finished sandbox is worth a final
-            # snapshot.
+            # A delete terminates a running or mid-transition actor outright;
+            # nothing about a finished sandbox is worth a final snapshot.
             try:
-                await self._control(
-                    "DeleteActor", ateapi_pb2.DeleteActorRequest(actor=actor.object_ref, any_state=True)
-                )
+                await self._control("DeleteActor", ateapi_pb2.DeleteActorRequest(actor=actor.object_ref))
             except grpc.aio.AioRpcError as e:
                 if e.code() != grpc.StatusCode.NOT_FOUND:
                     raise RuntimeError(f"deleting actor {actor.name!r} failed: {e.details()}") from e

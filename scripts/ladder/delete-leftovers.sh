@@ -12,5 +12,5 @@ set -u
 EV="$RUN_DIR/events.log"
 names=$(kubectl ate get actors -a "$ATESPACE" 2>/dev/null | awk 'NR>1 && $4 ~ /DELETING/ {print $2}'); n=$(echo "$names" | grep -c .)
 echo "$(date -u +%FT%TZ) delete-leftovers: $n DELETING: $(echo "$names" | tr '\n' ' ' | cut -c1-200)" | tee -a "$EV"
-for a in $names; do kubectl ate delete actor "$a" -a "$ATESPACE" --any-state >/dev/null 2>&1 & done; wait; sleep 5
+for a in $names; do kubectl ate delete actor "$a" -a "$ATESPACE" >/dev/null 2>&1 & done; wait; sleep 5
 echo "$(date -u +%FT%TZ) delete-leftovers: after: $(kubectl ate get actors -a "$ATESPACE" 2>/dev/null | awk 'NR>1 {print $4}' | sed 's/ACTOR_STATE_//' | sort | uniq -c | tr -s ' \n' ' ')" | tee -a "$EV"

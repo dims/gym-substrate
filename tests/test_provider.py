@@ -635,7 +635,7 @@ async def test_pause_outliving_its_deadline_waits_for_the_parked_state() -> None
     assert "GetActor" in recorder.rpcs()
 
 
-async def test_close_deletes_in_any_state() -> None:
+async def test_close_deletes_without_a_final_snapshot() -> None:
     recorder = _Recorder()
     provider = _make_provider(recorder)
     handle = await provider.create(SandboxSpec(image=IMAGE))
@@ -643,7 +643,7 @@ async def test_close_deletes_in_any_state() -> None:
     await provider.close(handle)
 
     deletes = [request for rpc, request in recorder.control_calls if rpc == "DeleteActor"]
-    assert len(deletes) == 1 and deletes[0].any_state
+    assert len(deletes) == 1
     assert "suspend" not in recorder.rpcs()
 
 

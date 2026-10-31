@@ -37,6 +37,6 @@ for ((c = 1; c <= CYCLES; c++)); do
   echo "cycle $c: suspended in ${s}s, resumed by the request in ${r}s, count $got (want $want) $ok, pod $(actor_pod)"
   [ "$ok" = ok ] || fails=$((fails + 1)); count=$got
 done
-kubectl ate delete actor "$NAME" -a "$NS" --any-state >/dev/null 2>&1 && echo "deleted $NAME"
+kubectl ate delete actor "$NAME" -a "$NS" >/dev/null 2>&1 && echo "deleted $NAME"
 echo "RESULT $([ "$fails" -eq 0 ] && echo PASS || echo "FAIL ($fails)")"
 [ "$fails" -eq 0 ]
