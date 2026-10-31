@@ -135,6 +135,7 @@ def _make_provider(
     suspend_policy: str = "never",
     idle_before_suspend_s: float = 0.0,
     exec_config: dict[str, Any] | None = None,
+    create_config: dict[str, Any] | None = None,
 ) -> Any:
     provider = substrate_provider.SubstrateProvider(
         connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE},
@@ -143,6 +144,7 @@ def _make_provider(
             "idle_before_suspend_s": idle_before_suspend_s,
             # A short, delay-free probe keeps the test fast.
             "ready_timeout_s": 5.0,
+            **(create_config or {}),
         },
         exec={"capacity_retry_delay_s": 0.0, **(exec_config or {})},
         probe={"stable_delay_s": 0.0},
@@ -751,6 +753,64 @@ async def test_exec_retries_a_bare_504_like_a_capacity_503() -> None:
 
     assert result.return_code == 0 and result.error_type is None
     assert execs == 3
+
+
+async def test_time_parked_at_the_router_is_not_the_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(substrate_provider, "_EXEC_REPLY_GRACE_S", 0.0)
+    recorder = _Recorder()
+    provider = _make_provider(recorder)
+    execs = 0
+
+    async def router(request: httpx.Request) -> httpx.Response:
+        nonlocal execs
+        if request.url.path != "/exec":
+            return httpx.Response(200)
+        execs += 1
+        if execs <= 3:
+            await asyncio.sleep(0.1)  # parked at the router, then refused
+            return httpx.Response(503, text='actor "swebench/gym-x" unavailable: no worker has room for the actor')
+        return httpx.Response(200, json={"stdout": "ok", "stderr": "", "exit_code": 0})
+
+    provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+
+    # 0.3 s parked against a 0.1 s command budget.
+    result = await provider.exec(handle, "true", timeout_s=0.1)
+
+    assert (result.return_code, execs) == (0, 4)
+
+
+async def test_parked_time_is_bounded_by_the_queue_budget(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(substrate_provider, "_EXEC_REPLY_GRACE_S", 0.0)
+    recorder = _Recorder()
+    provider = _make_provider(recorder, create_config={"ready_queue_timeout_s": 0.15})
+    execs = 0
+
+    async def router(request: httpx.Request) -> httpx.Response:
+        nonlocal execs
+        if request.url.path != "/exec":
+            return httpx.Response(200)
+        execs += 1
+        await asyncio.sleep(0.1)
+        return httpx.Response(503, text='actor "swebench/gym-x" unavailable: router at capacity')
+
+    provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+
+    with caplog.at_level(logging.WARNING, logger=substrate_provider.LOGGER.name):
+        result = await provider.exec(handle, "true", timeout_s=5)
+
+    assert (result.return_code, result.error_type, execs) == (
+        substrate_provider.SANDBOX_RUNTIME_RETURN_CODE,
+        "sandbox",
+        2,
+    )
+    warnings = _provider_log(caplog, logging.WARNING)
+    assert len(warnings) == 1 and "gave up" in warnings[0] and "parked" in warnings[0]
 
 
 async def test_capacity_retries_warn_at_the_threshold_then_at_each_doubling(caplog: pytest.LogCaptureFixture) -> None:

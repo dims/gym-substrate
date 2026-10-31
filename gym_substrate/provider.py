@@ -361,7 +361,8 @@ class SubstrateCreateConfig:
     # sandbox. Time a probe spends waiting on the router for a worker slot (a
     # capacity 503, or the 504 of a resume that outran its deadline) is not
     # charged to it: the actor is queued, not slow. ready_queue_timeout_s
-    # bounds that queue time instead.
+    # bounds that queue time instead, for the probe and for every request the
+    # router parks (see _http).
     ready_timeout_s: float = 1200.0
     ready_queue_timeout_s: float = 3600.0
 
@@ -692,15 +693,30 @@ class SubstrateProvider:
         started = loop.time()
         deadline = started + budget
         transient_deadline = started + min(budget, _TRANSIENT_RETRY_BUDGET_S)
+        # The router may hold a request for its whole parking budget before it
+        # forwards it, so a retried request gets the probe timeout (that budget
+        # plus a margin) on top of what is left of its own. Time parked and
+        # then refused is not the command's either: it moves the deadline and
+        # is bounded by ready_queue_timeout_s instead.
+        park_allowance = self._probe.timeout_s if retry else 0.0
+        queue_budget = self._create_config.ready_queue_timeout_s
+        queued = 0.0
         gate = self._semaphore if limited else contextlib.nullcontext()
         capacity_retries = 0
         warn_at = self._exec_config.capacity_warn_after_retries
         while True:
             remaining = max(deadline - loop.time(), 1.0)
+            attempt_started = loop.time()
             try:
                 async with gate:
                     response = await self._http_client.request(
-                        method, path, headers=headers, json=json, content=content, params=params, timeout=remaining
+                        method,
+                        path,
+                        headers=headers,
+                        json=json,
+                        content=content,
+                        params=params,
+                        timeout=remaining + park_allowance,
                     )
             except httpx.HTTPError as e:
                 # On a saturated host the last attempt is usually parked at the
@@ -712,6 +728,16 @@ class SubstrateProvider:
             if kind is None:
                 return response
             if kind == "capacity":
+                parked = loop.time() - attempt_started
+                queued += parked
+                deadline += parked
+                transient_deadline += parked
+                if queued >= queue_budget:
+                    reason = (
+                        f"parked {queued:.0f}s in all; router returned {response.status_code}: {response.text.strip()}"
+                    )
+                    _warn_gave_up(actor.name, path, capacity_retries, loop.time() - started, queue_budget, reason)
+                    return response
                 delay, limit = self._exec_config.capacity_retry_delay_s, deadline
             else:
                 delay, limit = _TRANSITION_RETRY_DELAY_S, transient_deadline

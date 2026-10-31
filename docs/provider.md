@@ -540,7 +540,7 @@ from runs at one to four times the slots:
   with a think time T between steps, N actors on S slots drain only when
   T >= H x (N/S - 1). On a 352-thread host H was about 70 s and the host restored about
   four actors per second. Below the rule, parked waits run past the budget, the provider
-  retries until the request budget (`default_timeout_s` plus 30 s), and the step fails
+  retries for up to `ready_queue_timeout_s` of parked time, and the step fails
   with return code 125 and an `error_type`; with Gym#4472 the rollout then ends with an
   error instead of scoring 0 silently.
 - **Pause pays when the think time is long against one checkpoint and restore.** The
