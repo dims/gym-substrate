@@ -25,7 +25,6 @@ import statistics
 import sys
 import time
 
-import httpx
 from nemo_gym.sandbox.providers.base import SandboxSpec
 
 from gym_substrate import SubstrateProvider
@@ -151,12 +150,6 @@ async def main() -> int:
         # Above the router's parking budget, or a parked probe is cancelled and
         # re-parked at the back of the queue every timeout.
         probe={"timeout_s": float(os.environ.get("PROBE_TIMEOUT_S", "660"))},
-    )
-    # The provider's own client keeps httpx's default pool of 100 connections,
-    # which would cap in-flight execs at 100; give it an unbounded pool.
-    provider._http_client = httpx.AsyncClient(
-        base_url=f"http://{connection['atenet_addr']}",
-        limits=httpx.Limits(max_connections=None, max_keepalive_connections=4096),
     )
     rows: list = []
 
