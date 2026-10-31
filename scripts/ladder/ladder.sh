@@ -99,9 +99,13 @@ cleanup_actors() { python3 "$REPO/scripts/delete_actors.py" "$ATESPACE" --all 2>
 pgrep -f "ladder/host-sampler.sh" >/dev/null || { setsid nohup bash "$LD/host-sampler.sh" "$RUN_DIR/host-samples.txt" 5 > "$LOG_DIR/host-sampler.log" 2>&1 < /dev/null & }
 ev "start $MODE; slots $SLOTS; api $ATEAPI_ADDR; restarts baseline $RESTARTS0"
 
+# unique_name NAME: a repeated arm gets a numbered name (NAME-r2, -r3), so its rows, logs and samples do
+# not replace the earlier sample's.
+unique_name() { local base=$1 n=$1 i=2
+  while ls "$RUN_DIR/$n"-[0-9]*.tsv "$RUN_DIR/$n.jsonl" "$RUN_DIR/$n-snaps.txt" >/dev/null 2>&1; do n="$base-r$i"; i=$((i + 1)); done; echo "$n"; }
 # run_burn NAME IMAGE SHARDS STAGGER N STEPS GAP POLICY BURN ALLOC: burn_driver.py over SHARDS
 # processes of N/SHARDS sandboxes each (one gRPC channel per shard), one tsv per shard.
-run_burn() { local name=$1 image=$2 shards=$3 stagger=$4 n=$5; shift 5
+run_burn() { local name image=$2 shards=$3 stagger=$4 n=$5; name=$(unique_name "$1"); shift 5
   [ $((n % shards)) -eq 0 ] || fail SHARDS "$name: $n sandboxes do not split into $shards shards"
   ev "start $name: image $image, $shards x $((n / shards)) sandboxes, stagger $stagger, steps/gap/policy/burn/alloc $*"; snap "before-$name"; cleanup_actors
   local T0=$SECONDS; rm -f "$RUN_DIR/$name.stopped"
@@ -115,7 +119,7 @@ run_burn() { local name=$1 image=$2 shards=$3 stagger=$4 n=$5; shift 5
 
 # run_gym NAME CFG N THINK_S [TIMEBOX_S]: restart the replay policy with the think time, then one
 # run_arm (a warm-up rollout, then N rollouts of the gate row at once).
-run_gym() { local name=$1 cfg=$2 n=$3 think=$4 box=${5:-0} rc
+run_gym() { local name cfg=$2 n=$3 think=$4 box=${5:-0} rc; name=$(unique_name "$1")
   pkill -f "[r]eplay_policy.py" 2>/dev/null; sleep 2
   nohup python "$REPO/scripts/replay_policy.py" --rollouts responses_api_agents/mini_swe_agent_2/data/example_rollouts.jsonl --port 9797 --think-mean-s "$think" --seed 1 > "$LOG_DIR/replay-$name.log" 2>&1 < /dev/null & sleep 4
   curl -sf localhost:9797/healthz >/dev/null || { ev "replay policy failed to start for $name"; return 1; }
