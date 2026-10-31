@@ -6,12 +6,16 @@
 """Sandbox provider backed by Substrate actors."""
 
 import asyncio
+import base64
 import contextlib
 import copy
 import hashlib
 import logging
 import os
 import random
+import ssl
+import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -36,6 +40,17 @@ from gym_substrate._ateapi import ateapi_pb2, ateapi_pb2_grpc
 LOGGER = logging.getLogger(__name__)
 
 _TOKEN_TTL_S = 3600
+
+# The ingress router takes mTLS only. Its client certificate comes from the
+# podidentity signer through a PodCertificateRequest, as kubectl-ate's does, and
+# the signer caps it at 24 h. Gym makes one provider per sandbox, so the
+# certificate is shared by every provider in the process and requested again
+# once half its life has passed.
+_PODIDENTITY_SIGNER = "podidentity.podcert.ate.dev/identity"
+_ROUTER_CERT_LIFETIME_S = 24 * 3600
+_ROUTER_CERT_ISSUE_TIMEOUT_S = 120.0
+_router_certs: dict[tuple[str, str], tuple[bytes, bytes, float]] = {}
+_router_certs_lock = threading.Lock()
 
 TARGET_ACTOR_HEADER = "ate-target-actor"
 
@@ -208,6 +223,89 @@ def _without_null_credentials(kubeconfig: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _request_router_certificate(k8s_client: Any, namespace: str, service_account: str) -> tuple[bytes, bytes]:
+    """Mint a client certificate for the router: PEM key and chain.
+
+    The PodCertificateRequest names a pod, ServiceAccount and node that do not
+    exist: kube-apiserver only checks them for a kubelet's requests, and the
+    signer takes the identity from the request. The key never leaves this
+    process.
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([])).sign(key, hashes.SHA256())
+    group, version, plural = "certificates.k8s.io", "v1", "podcertificaterequests"
+    body = {
+        "apiVersion": f"{group}/{version}",
+        "kind": "PodCertificateRequest",
+        "metadata": {"generateName": "gym-substrate-", "namespace": namespace},
+        "spec": {
+            "signerName": _PODIDENTITY_SIGNER,
+            "podName": "gym-substrate",
+            "podUID": str(uuid.uuid4()),
+            "serviceAccountName": service_account,
+            "serviceAccountUID": str(uuid.uuid4()),
+            "nodeName": "gym-substrate",
+            "nodeUID": str(uuid.uuid4()),
+            "maxExpirationSeconds": _ROUTER_CERT_LIFETIME_S,
+            "stubPKCS10Request": base64.b64encode(csr.public_bytes(serialization.Encoding.DER)).decode(),
+        },
+    }
+    api = k8s_client.CustomObjectsApi()
+    name = api.create_namespaced_custom_object(group, version, namespace, plural, body)["metadata"]["name"]
+    try:
+        deadline = time.monotonic() + _ROUTER_CERT_ISSUE_TIMEOUT_S
+        while True:
+            status = api.get_namespaced_custom_object(group, version, namespace, plural, name).get("status") or {}
+            for condition in status.get("conditions") or []:
+                if condition.get("status") != "True":
+                    continue
+                if condition["type"] == "Issued":
+                    key_pem = key.private_bytes(
+                        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+                    )
+                    return key_pem, status["certificateChain"].encode()
+                if condition["type"] in ("Denied", "Failed"):
+                    raise RuntimeError(
+                        f"PodCertificateRequest {namespace}/{name} {condition['type']}: "
+                        f"{condition.get('reason')}: {condition.get('message')}"
+                    )
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"PodCertificateRequest {namespace}/{name} was not issued within {_ROUTER_CERT_ISSUE_TIMEOUT_S:g}s"
+                )
+            time.sleep(0.5)
+    finally:
+        # kube-apiserver garbage collects old requests, so a failed delete is left alone.
+        with contextlib.suppress(Exception):
+            api.delete_namespaced_custom_object(group, version, namespace, plural, name)
+
+
+class _ServerNameContext(ssl.SSLContext):
+    """An SSLContext that verifies the peer against one fixed name, whatever host was dialed."""
+
+    server_name = ""
+
+    def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
+        return super().wrap_bio(incoming, outgoing, server_side, self.server_name, session)
+
+    def wrap_socket(
+        self,
+        sock,
+        server_side=False,
+        do_handshake_on_connect=True,
+        suppress_ragged_eofs=True,
+        server_hostname=None,
+        session=None,
+    ):
+        return super().wrap_socket(
+            sock, server_side, do_handshake_on_connect, suppress_ragged_eofs, self.server_name, session
+        )
+
+
 @dataclass(frozen=True)
 class SubstrateConnectionConfig:
     """Where the control plane and the router are, and who we are to them."""
@@ -234,6 +332,14 @@ class SubstrateConnectionConfig:
     service_account: str = "ate-client"
     service_account_namespace: str = "ate-system"
     token: str | None = None
+
+    # atenet-router takes mTLS only and allows the SPIFFE IDs listed in its
+    # --ingress-allowed-spiffe-ids. The client certificate is requested for
+    # this ServiceAccount in service_account_namespace, the identity
+    # kubectl-ate presents. The router's serving certificate names its
+    # in-cluster Service, which is verified whatever address atenet_addr dials.
+    ingress_service_account: str = "atenet-client"
+    router_server_name: str = "atenet-router.ate-system.svc"
 
     grpc_timeout_s: float = 120.0
     # Connections to the router at once; None is unlimited. Gym makes one
@@ -495,6 +601,29 @@ class SubstrateProvider:
     def _channel_credentials(self) -> grpc.ChannelCredentials:
         return grpc.ssl_channel_credentials(root_certificates=self._ca_bundle())
 
+    def _router_tls_context(self) -> ssl.SSLContext:
+        """mTLS to the router: the process's client certificate, the cluster CA, the router's name."""
+        namespace = self._connection.service_account_namespace
+        service_account = self._connection.ingress_service_account
+        with _router_certs_lock:
+            cached = _router_certs.get((namespace, service_account))
+            if cached is None or time.monotonic() >= cached[2]:
+                key_pem, chain_pem = _request_router_certificate(self._kube_client(), namespace, service_account)
+                cached = (key_pem, chain_pem, time.monotonic() + _ROUTER_CERT_LIFETIME_S / 2)
+                _router_certs[(namespace, service_account)] = cached
+        context = _ServerNameContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.server_name = self._connection.router_server_name
+        context.load_verify_locations(cadata=self._ca_bundle().decode())
+        context.set_alpn_protocols(["http/1.1"])
+        # load_cert_chain reads files: the key is on disk for this call only, readable by this user.
+        with tempfile.TemporaryDirectory() as d:
+            cert_path, key_path = os.path.join(d, "tls.crt"), os.path.join(d, "tls.key")
+            with os.fdopen(os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
+                f.write(cached[0])
+            Path(cert_path).write_bytes(cached[1])
+            context.load_cert_chain(cert_path, key_path)
+        return context
+
     async def _control(self, rpc: str, request: Any) -> Any:
         """Call one ateapi Control RPC, retrying transient failures."""
         if self._stub is None:
@@ -544,7 +673,9 @@ class SubstrateProvider:
                 max_connections=self._connection.http_max_connections,
                 max_keepalive_connections=self._connection.http_max_connections or 1024,
             )
-            self._http_client = httpx.AsyncClient(base_url=f"http://{self._connection.atenet_addr}", limits=limits)
+            self._http_client = httpx.AsyncClient(
+                base_url=f"https://{self._connection.atenet_addr}", verify=self._router_tls_context(), limits=limits
+            )
 
         headers = {TARGET_ACTOR_HEADER: actor.target}
         # Join the caller's trace (W3C traceparent) so the router's resume and

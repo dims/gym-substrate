@@ -1,4 +1,4 @@
-# The API, the router and Prometheus on every node: <node ip>:30443 (gRPC over TLS), :30080 (HTTP)
+# The API, the router and Prometheus on every node: <node ip>:30443 (gRPC over TLS), :30080 (mTLS)
 # and :30090 (the kind install's Prometheus, so a monitor reads metrics when sshd is starved).
 apiVersion: v1
 kind: Service
@@ -25,9 +25,9 @@ spec:
   selector:
     app: atenet-router
   ports:
-  - name: http
-    port: 80
-    targetPort: 8080
+  - name: https
+    port: 443
+    targetPort: 8443
     nodePort: 30080
 ---
 apiVersion: v1

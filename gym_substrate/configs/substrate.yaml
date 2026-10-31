@@ -5,7 +5,7 @@ sandbox:
     connection:
       # Both default to a port-forward:
       #   kubectl port-forward -n ate-system svc/api 8080:443
-      #   kubectl port-forward -n ate-system svc/atenet-router 8000:80
+      #   kubectl port-forward -n ate-system svc/atenet-router 8000:443
       ateapi_addr: localhost:8080
       atenet_addr: localhost:8000
       atespace: nemo-gym

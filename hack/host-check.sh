@@ -16,7 +16,7 @@ ver() {
   esac | head -1
 }
 echo "info arch $(arch), page size $(getconf PAGESIZE), kvm $([ -e /dev/kvm ] && echo yes || echo no), $(nproc) cpus, $(free -g | awk '/Mem:/{print $2}') GiB, $(df -BG --output=avail /var/lib/docker 2>/dev/null | tail -1 | tr -d ' ' || df -BG --output=avail / | tail -1 | tr -d ' ') free for docker"
-for t in docker kind kubectl go ko uv zstd fuser python3 jq curl git sha256sum shasum; do
+for t in docker kind kubectl go ko uv zstd fuser python3 jq curl git openssl sha256sum shasum; do
   if command -v "$t" >/dev/null 2>&1; then pass "$t: $(ver "$t")"; else failed "$t missing"; fi
 done
 if docker info >/dev/null 2>&1; then pass "docker daemon"; else failed "docker daemon not reachable"; fi

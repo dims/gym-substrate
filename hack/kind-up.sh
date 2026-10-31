@@ -48,10 +48,22 @@ docker exec kind-control-plane crictl pull registry.k8s.io/pause:3.10 >/dev/null
 echo "node egress ok"
 
 step "ate-system"
+# The ingress router takes mTLS only; kubectl-ate and the provider present this identity.
+INGRESS_CLIENT_ID=spiffe://cluster.local/ns/ate-system/sa/atenet-client
 if kubectl -n ate-system get deploy ate-api-server >/dev/null 2>&1; then
   echo "ate-system present"
 else
-  hack/install-ate-kind.sh --deploy-ate-system --credential-provider='{"name":"k8s.io"}' > "$LOG_DIR/install.log" 2>&1 || { tail -30 "$LOG_DIR/install.log"; fail INSTALL; }
+  if [ "$RUNTIME" = microvm ] && [ -n "${MICROVM_ASSET_DIR:-}" ]; then
+    # ate-setup assembles the guest assets under bin/microvm-assets/<arch>/ and skips the download
+    # when the stamp there matches its pins.
+    A="bin/microvm-assets/$(arch)"
+    if ! cmp -s "$MICROVM_ASSET_DIR/.asset-versions" "$A/.asset-versions"; then
+      { mkdir -p "$A" && cp -a "$MICROVM_ASSET_DIR/." "$A/"; } || fail MICROVM_ASSETS "copying $MICROVM_ASSET_DIR to $A"
+    fi
+    echo "microvm assets seeded from $MICROVM_ASSET_DIR: $(tr '\n' ' ' < "$A/.asset-versions")"
+  fi
+  go run ./cmd/ate-setup --kind --credential-provider='{"name":"k8s.io"}' deploy ate-system \
+    --sandbox-classes="$RUNTIME" --ingress-allowed-spiffe-ids="$INGRESS_CLIENT_ID" > "$LOG_DIR/install.log" 2>&1 || { tail -30 "$LOG_DIR/install.log"; fail INSTALL; }
 fi
 kubectl -n ate-system wait --for=condition=Available deploy --all --timeout=600s >/dev/null || { kubectl -n ate-system get pods; fail ATE_SYSTEM_PODS; }
 pods_settled() { [ -z "$(kubectl -n ate-system get pods --no-headers 2>/dev/null | awk '$3 != "Running" && $3 != "Completed"')" ]; }
@@ -113,12 +125,15 @@ bash "$REPO/hack/kind-api-access.sh" >/dev/null || fail API_HOST_ACCESS
 NODE_IP=$(docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' kind-control-plane); printf '%s' "$NODE_IP" > "$RUN_DIR/node-ip"
 A=000; R=000
 for _ in $(seq 1 12); do
-  A=$(curl -sk -m 5 -o /dev/null -w '%{http_code}' "https://$NODE_IP:30443/"); R=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$NODE_IP:30080/")
-  [ "$A" != 000 ] && [ "$R" != 000 ] && break
+  A=$(curl -sk -m 5 -o /dev/null -w '%{http_code}' "https://$NODE_IP:30443/")
+  # The router requires a client certificate, so a bare handshake fails; the listener presenting
+  # its own certificate is the check.
+  R=$(echo | timeout 10 openssl s_client -connect "$NODE_IP:30080" 2>/dev/null | grep -c 'BEGIN CERTIFICATE')
+  [ "$A" != 000 ] && [ "$R" != 0 ] && break
   sleep 5
 done
-if [ "$A" = 000 ] || [ "$R" = 000 ]; then fail NODEPORTS "api $A router $R after 60 s"; fi
-echo "node ip $NODE_IP; api np https $A, router np http $R, prometheus np http $(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$NODE_IP:30090/-/ready")"
+if [ "$A" = 000 ] || [ "$R" = 0 ]; then fail NODEPORTS "api $A router certificates $R after 60 s"; fi
+echo "node ip $NODE_IP; api np https $A, router np mtls (certificates $R), prometheus np http $(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$NODE_IP:30090/-/ready")"
 
 step "demo pools and gym pools"
 # The demo of each class carries the install's worker image for that class; the gym pools

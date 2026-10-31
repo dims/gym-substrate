@@ -132,7 +132,12 @@ them. Patch between runs, never while actors exist.
 
 **Reaching the cluster.** `connection.ateapi_addr` and `connection.atenet_addr` take any
 host:port that reaches the `api` Service (gRPC over TLS, 443) and the `atenet-router`
-Service (HTTP, 80). A port-forward serves a smoke. For a run, apply
+Service (mTLS, 443). The router allows the SPIFFE IDs in its `--ingress-allowed-spiffe-ids`
+(`hack/kind-up.sh` installs with the one `kubectl ate proxy actor` presents,
+`spiffe://cluster.local/ns/ate-system/sa/atenet-client`). The provider presents the same
+identity, from a certificate it requests through a PodCertificateRequest once per process and
+renews after 12 h, and verifies the router against `connection.router_server_name`
+(`atenet-router.ate-system.svc`) whatever address it dials. A port-forward serves a smoke. For a run, apply
 `manifests/nodeports.yaml` (30443 and 30080 on every node): `kubectl port-forward`
 collapsed under load and cancelled in-flight pauses. On kind the node address is
 `docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' kind-control-plane`.
@@ -257,14 +262,14 @@ exits at startup.
 
 ```bash
 kubectl port-forward -n ate-system svc/api 8080:443 &
-kubectl port-forward -n ate-system svc/atenet-router 8000:80 &
+kubectl port-forward -n ate-system svc/atenet-router 8000:443 &
 
 source .venv/bin/activate
 gym env start "+config_paths=[responses_api_agents/mini_swe_agent_2/configs/mini_swe_agent_2.yaml,/path/to/substrate.yaml,responses_api_models/openai_model/configs/openai_model.yaml]"
 ```
 
-Four `startup complete` lines in its output mean the head server and the three servers
-are up. One rollout of the first row of Gym's example input, from a second shell in the
+Four `Uvicorn running on` lines in its output mean the head server and the three servers
+have bound their ports. One rollout of the first row of Gym's example input, from a second shell in the
 same venv:
 
 ```bash

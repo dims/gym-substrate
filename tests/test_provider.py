@@ -874,3 +874,58 @@ async def test_failed_create_cleanup_keeps_deleting_in_the_background(monkeypatc
     await provider.aclose()
 
     assert deletes == 4
+
+
+class _FakePodCertificateRequests:
+    """CustomObjectsApi for one PodCertificateRequest that the signer issues or denies."""
+
+    def __init__(self, outcome: str, chain: str) -> None:
+        self.outcome, self.chain, self.created, self.deleted = outcome, chain, None, []
+
+    def create_namespaced_custom_object(self, group, version, namespace, plural, body):
+        assert (group, version, plural) == ("certificates.k8s.io", "v1", "podcertificaterequests")
+        self.created = body
+        return {"metadata": {"name": body["metadata"]["generateName"] + "x7"}}
+
+    def get_namespaced_custom_object(self, group, version, namespace, plural, name):
+        if self.outcome == "Issued":
+            return {"status": {"conditions": [{"type": "Issued", "status": "True"}], "certificateChain": self.chain}}
+        return {"status": {"conditions": [{"type": "Denied", "status": "True", "reason": "Policy", "message": "no"}]}}
+
+    def delete_namespaced_custom_object(self, group, version, namespace, plural, name):
+        self.deleted.append(name)
+
+
+class _FakeK8s:
+    def __init__(self, api) -> None:
+        self._api = api
+
+    def CustomObjectsApi(self):  # noqa: N802 - the kubernetes client's name
+        return self._api
+
+
+@pytest.mark.parametrize("outcome", ["Issued", "Denied"])
+def test_router_certificate_comes_from_a_podcertificaterequest(outcome: str) -> None:
+    import base64
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    api = _FakePodCertificateRequests(outcome, "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+
+    if outcome == "Denied":
+        with pytest.raises(RuntimeError, match="Denied: Policy: no"):
+            substrate_provider._request_router_certificate(_FakeK8s(api), "ate-system", "atenet-client")
+    else:
+        key_pem, chain = substrate_provider._request_router_certificate(_FakeK8s(api), "ate-system", "atenet-client")
+        assert chain == api.chain.encode()
+        spec = api.created["spec"]
+        assert (spec["signerName"], spec["serviceAccountName"], spec["maxExpirationSeconds"]) == (
+            "podidentity.podcert.ate.dev/identity",
+            "atenet-client",
+            24 * 3600,
+        )
+        csr = x509.load_der_x509_csr(base64.b64decode(spec["stubPKCS10Request"]))
+        key = serialization.load_pem_private_key(key_pem, password=None)
+        assert csr.public_key().public_numbers() == key.public_key().public_numbers()
+    assert api.deleted == ["gym-substrate-x7"] and api.created["metadata"]["namespace"] == "ate-system"

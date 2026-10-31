@@ -11,22 +11,26 @@
 #   scripts/probes/counter-roundtrip.sh [CYCLES]        (default 5)
 # Environment: WORK (hack/_lib.sh), DEMO_ATESPACE and DEMO_TEMPLATE (default ate-demo-counter-microvm,
 # counter-microvm: the demo hack/kind-up.sh deploys for the micro-VM class; the gVisor demo is
-# ate-demo-counter / counter).
+# ate-demo-counter / counter), PROXY_PORT (default 18080: the router takes mTLS only, so the
+# requests go through one `kubectl ate proxy actor`).
 set -u
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/../../hack/_lib.sh"
 CYCLES=${1:-5}; NS="${DEMO_ATESPACE:-ate-demo-counter-microvm}"; TPL="${DEMO_TEMPLATE:-counter-microvm}"
-NODE_IP=$(node_ip); [ -n "$NODE_IP" ] || fail NODE_IP "no $RUN_DIR/node-ip"
+PROXY_PORT="${PROXY_PORT:-18080}"
 NAME="roundtrip-$(date -u +%H%M%S)"
 actor_state() { kubectl ate get actor "$NAME" -a "$NS" 2>/dev/null | awk 'NR>1 {print $4}'; }
 actor_pod() { kubectl ate get actor "$NAME" -a "$NS" 2>/dev/null | awk 'NR>1 {print $5}'; }
 wait_state() { local want=$1 t=$2 i; for ((i = 0; i < t; i++)); do [ "$(actor_state)" = "$want" ] && return 0; sleep 1; done; return 1; }
-bump() { curl -s -m 300 -X POST -H "ate-target-actor: $NS/$NAME" "http://$NODE_IP:30080/" | grep -o 'preserved memory count: [0-9]*' | awk '{print $4}'; }
+bump() { curl -s -m 300 -X POST "http://127.0.0.1:$PROXY_PORT/" | grep -o 'preserved memory count: [0-9]*' | awk '{print $4}'; }
 fails=0
 step "counter round trips: $CYCLES on $NS/$TPL"
 t=$SECONDS
 kubectl ate create actor "$NAME" -a "$NS" --template "$TPL" >/dev/null || fail CREATE
 wait_state ACTOR_STATE_SUSPENDED 300 || fail CREATED "state $(actor_state) after 300 s (a new actor is SUSPENDED on its golden snapshot)"
+kubectl ate proxy actor "$NAME" -a "$NS" "$PROXY_PORT:80" > "$LOG_DIR/proxy-$NAME.log" 2>&1 & PROXY=$!
+proxy_up() { nc -z 127.0.0.1 "$PROXY_PORT" 2>/dev/null; }
+wait_for 60 "kubectl ate proxy on $PROXY_PORT" proxy_up || { kill "$PROXY" 2>/dev/null; tail -3 "$LOG_DIR/proxy-$NAME.log"; fail PROXY; }
 c0=$((SECONDS - t)); t=$SECONDS; count=$(bump); echo "created in ${c0}s; first request (the first resume) ${count:-?} in $((SECONDS - t))s on $(actor_pod)"
 [ "$count" = 1 ] || fails=$((fails + 1))
 for ((c = 1; c <= CYCLES; c++)); do
@@ -37,6 +41,7 @@ for ((c = 1; c <= CYCLES; c++)); do
   echo "cycle $c: suspended in ${s}s, resumed by the request in ${r}s, count $got (want $want) $ok, pod $(actor_pod)"
   [ "$ok" = ok ] || fails=$((fails + 1)); count=$got
 done
+kill "$PROXY" 2>/dev/null
 kubectl ate delete actor "$NAME" -a "$NS" >/dev/null 2>&1 && echo "deleted $NAME"
 echo "RESULT $([ "$fails" -eq 0 ] && echo PASS || echo "FAIL ($fails)")"
 [ "$fails" -eq 0 ]
