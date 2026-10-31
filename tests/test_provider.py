@@ -649,6 +649,37 @@ async def test_close_deletes_without_a_final_snapshot() -> None:
     assert "suspend" not in recorder.rpcs()
 
 
+@pytest.mark.parametrize("gone", [True, False])
+async def test_close_waits_for_a_delete_that_outran_its_deadline(gone: bool) -> None:
+    recorder = _Recorder()
+    provider = substrate_provider.SubstrateProvider(
+        connection={"atespace": "swebench", "template_namespace": TEMPLATE_NAMESPACE, "grpc_timeout_s": 0.05},
+        create={"idle_before_suspend_s": 0.0, "ready_timeout_s": 5.0},
+        probe={"stable_delay_s": 0.0},
+    )
+    provider._http = recorder.http  # type: ignore[method-assign]
+    deletes = 0
+
+    async def control(rpc: str, request: Any) -> Any:
+        nonlocal deletes
+        if rpc == "DeleteActor":
+            deletes += 1
+            raise _grpc_error(grpc.StatusCode.DEADLINE_EXCEEDED, "Deadline Exceeded")
+        if rpc == "GetActor" and deletes and gone:
+            raise _grpc_error(grpc.StatusCode.NOT_FOUND, "not found")
+        return await recorder.control(rpc, request)
+
+    provider._control = control  # type: ignore[method-assign]
+    handle = await provider.create(SandboxSpec(image=IMAGE))
+
+    if gone:
+        await provider.close(handle)
+    else:
+        with pytest.raises(RuntimeError, match="still ACTOR_STATE_RUNNING"):
+            await provider.close(handle)
+    assert deletes == 1
+
+
 def test_router_target_is_atespace_slash_actor() -> None:
     actor = substrate_provider._SubstrateActor(atespace="swebench", name="gym-abc", template="t", image="i")
     assert substrate_provider.TARGET_ACTOR_HEADER == "ate-target-actor"

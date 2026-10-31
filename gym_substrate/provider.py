@@ -1222,8 +1222,31 @@ class SubstrateProvider:
             try:
                 await self._control("DeleteActor", ateapi_pb2.DeleteActorRequest(actor=actor.object_ref))
             except grpc.aio.AioRpcError as e:
-                if e.code() != grpc.StatusCode.NOT_FOUND:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return
+                if e.code() != grpc.StatusCode.DEADLINE_EXCEEDED:
                     raise RuntimeError(f"deleting actor {actor.name!r} failed: {e.details()}") from e
+                # The terminate queued behind others on a loaded node and
+                # outran the client deadline; ateapi keeps working on it, so
+                # wait for the actor to be gone instead of failing the close.
+                await self._wait_until_gone(actor)
+
+    async def _wait_until_gone(self, actor: _SubstrateActor) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._connection.grpc_timeout_s
+        while True:
+            try:
+                reply = await self._control("GetActor", ateapi_pb2.GetActorRequest(actor=actor.object_ref))
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return
+                raise RuntimeError(f"deleting actor {actor.name!r} failed: {e.details()}") from e
+            if loop.time() >= deadline:
+                raise RuntimeError(
+                    f"actor {actor.name!r} is still {ateapi_pb2.ActorState.Name(reply.status.state)} "
+                    f"{self._connection.grpc_timeout_s:g}s after its delete outran the deadline"
+                )
+            await asyncio.sleep(2.0)
 
     async def aclose(self) -> None:
         # A park still in flight must finish before its channel goes away, or
