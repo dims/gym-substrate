@@ -42,7 +42,7 @@ jobs:
       - name: Image and template
         run: |
           hack/images.sh python:3.12-slim
-          KO_DOCKER_REPO=localhost:5001 BUCKET_NAME=ate-snapshots WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=1Gi WAIT_GOLDEN=1 \
+          KO_DOCKER_REPO=localhost:5001 WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=1Gi WAIT_GOLDEN=1 \
             hack/gym-templates.sh "$(cat ~/gym-substrate-run/run/images.txt)"
       - name: Live smoke
         run: |

@@ -17,7 +17,7 @@
 # provider. The image runs untouched; this directory's sandbox server is
 # mounted from an image volume and set as the container command.
 #
-#   BUCKET_NAME=<snapshot bucket> hack/gym-templates.sh IMAGE...
+#   hack/gym-templates.sh IMAGE...
 #
 #   ATESPACE        templates go here (default nemo-gym); created if missing
 #   WORKLOAD        WorkerPool label the templates select (default sandbox)
@@ -37,7 +37,6 @@
 set -o errexit -o nounset -o pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-: "${BUCKET_NAME:?set BUCKET_NAME to the snapshot bucket}"
 ATESPACE="${ATESPACE:-nemo-gym}"
 WORKLOAD="${WORKLOAD:-sandbox}"
 ACTOR_CPU="${ACTOR_CPU:-1}"
@@ -118,7 +117,6 @@ resources:
     memoryBytes: $(bytes "${ACTOR_MEMORY}")
 snapshotConfig:
   preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
-  storageLocation: gs://${BUCKET_NAME}/${ATESPACE}/
 MANIFEST
   echo "${ATESPACE}/${name} serves ${ref}"
 done

@@ -174,11 +174,10 @@ an actor names a template rather than an image, so the set is built ahead of a r
 it from any directory, against the cluster `kubectl` points at:
 
 ```bash
-KO_DOCKER_REPO=<registry> BUCKET_NAME=<snapshot bucket> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
+KO_DOCKER_REPO=<registry> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
   hack/gym-templates.sh swebench/sweb.eval.x86_64.django_1776_django-10973:latest
 ```
 
-- `BUCKET_NAME` is the bucket the install keeps snapshots in (`ate-snapshots` on kind).
   The script writes the location as `gs://<bucket>/<atespace>/`; Substrate reads the
   bucket from the location's host whatever the backend. An existing template shows the
   install's location under `snapshotConfig.storageLocation`

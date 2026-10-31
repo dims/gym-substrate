@@ -7,13 +7,12 @@
 # saturation provider configs: exec concurrency 4096, idle 3 s before a pause, and the never
 # variant; plus the agent-server concurrency overlay.
 #   scripts/ladder/ladder-templates.sh
-# Environment: WORK (hack/_lib.sh), REGISTRY, ATESPACE, BUCKET_NAME (default ate-snapshots).
+# Environment: WORK (hack/_lib.sh), REGISTRY, ATESPACE.
 # Sizes: burn 1/4Gi, burn-s 500m/2Gi, burn-xs 250m/1Gi, burn-xxs 125m/512Mi; with POOL_CPU 8 and
 # POOL_MEMORY 32Gi a worker holds 8, 16, 32 or 64 of them.
 set -uo pipefail
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/../../hack/_lib.sh"
-BUCKET_NAME="${BUCKET_NAME:-ate-snapshots}"
 step "burn tags"
 SRC="$REGISTRY/python:3.12-slim"
 docker image inspect "$SRC" >/dev/null 2>&1 || fail BURN_SOURCE "$SRC is not in the local docker store; run hack/images.sh first"
@@ -29,7 +28,7 @@ for spec in "burn 1 4Gi" "burn-s 500m 2Gi" "burn-xs 250m 1Gi" "burn-xxs 125m 512
   # shellcheck disable=SC2086
   set -- $spec
   # An empty AGENT_IMAGE lets gym-templates.sh build one with ko.
-  KO_DOCKER_REPO="$REGISTRY" BUCKET_NAME="$BUCKET_NAME" WORKLOAD=gym ACTOR_CPU="$2" ACTOR_MEMORY="$3" ATESPACE="$ATESPACE" AGENT_IMAGE="$AGENT_IMAGE" WAIT_GOLDEN=1 \
+  KO_DOCKER_REPO="$REGISTRY" WORKLOAD=gym ACTOR_CPU="$2" ACTOR_MEMORY="$3" ATESPACE="$ATESPACE" AGENT_IMAGE="$AGENT_IMAGE" WAIT_GOLDEN=1 \
     bash "$REPO/hack/gym-templates.sh" "$REGISTRY/$1:3.12-slim" > "$LOG_DIR/template-$1.log" 2>&1 || { tail -5 "$LOG_DIR/template-$1.log"; fail TEMPLATE "$1"; }
   echo "template $1 ($2 / $3): $(tail -1 "$LOG_DIR/template-$1.log")"
   [ -n "$AGENT_IMAGE" ] || AGENT_IMAGE=$(kubectl ate get actor-template -a "$ATESPACE" -o yaml 2>/dev/null | grep -o -m1 "$REGISTRY/sandbox-agent@sha256:[0-9a-f]*")

@@ -45,9 +45,9 @@ run images "^images done: [1-9]" bash "$REPO/hack/images.sh" "$GATE_INSTANCE" py
 step "templates"
 TASK_IMAGES=$(grep -v '/python:3.12-slim$' "$RUN_DIR/images.txt"); SMOKE_IMAGE=$(grep '/python:3.12-slim$' "$RUN_DIR/images.txt")
 # shellcheck disable=SC2086
-KO_DOCKER_REPO="$REGISTRY" BUCKET_NAME="${BUCKET_NAME:-ate-snapshots}" WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi WAIT_GOLDEN=1 ATESPACE="$ATESPACE" bash "$REPO/hack/gym-templates.sh" $TASK_IMAGES 2>&1 | tee "$LOG_DIR/templates-task.log"
+KO_DOCKER_REPO="$REGISTRY" WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi WAIT_GOLDEN=1 ATESPACE="$ATESPACE" bash "$REPO/hack/gym-templates.sh" $TASK_IMAGES 2>&1 | tee "$LOG_DIR/templates-task.log"
 need "$LOG_DIR/templates-task.log" "^all templates have a golden"
-KO_DOCKER_REPO="$REGISTRY" BUCKET_NAME="${BUCKET_NAME:-ate-snapshots}" WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=1Gi WAIT_GOLDEN=1 ATESPACE="$ATESPACE" bash "$REPO/hack/gym-templates.sh" "$SMOKE_IMAGE" 2>&1 | tee "$LOG_DIR/templates-smoke.log"
+KO_DOCKER_REPO="$REGISTRY" WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=1Gi WAIT_GOLDEN=1 ATESPACE="$ATESPACE" bash "$REPO/hack/gym-templates.sh" "$SMOKE_IMAGE" 2>&1 | tee "$LOG_DIR/templates-smoke.log"
 need "$LOG_DIR/templates-smoke.log" "^all templates have a golden"
 run gym-checkout "^== .* gym-checkout done" bash "$REPO/hack/gym-checkout.sh"
 run gate "^GATE PASS" bash "$REPO/hack/gate.sh" "gate-$TS"

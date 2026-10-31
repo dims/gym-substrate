@@ -39,7 +39,7 @@ uv sync && uv run pytest
 With a Substrate install and `kubectl-ate` on the path:
 
 ```bash
-BUCKET_NAME=<snapshot bucket> KO_DOCKER_REPO=<registry> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
+KO_DOCKER_REPO=<registry> WORKLOAD=gym ACTOR_CPU=1 ACTOR_MEMORY=4Gi \
   hack/gym-templates.sh python:3.12-slim <image>...
 ```
 
