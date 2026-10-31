@@ -104,7 +104,7 @@ ev "start $MODE; slots $SLOTS; api $ATEAPI_ADDR; restarts baseline $RESTARTS0"
 run_burn() { local name=$1 image=$2 shards=$3 stagger=$4 n=$5; shift 5
   [ $((n % shards)) -eq 0 ] || fail SHARDS "$name: $n sandboxes do not split into $shards shards"
   ev "start $name: image $image, $shards x $((n / shards)) sandboxes, stagger $stagger, steps/gap/policy/burn/alloc $*"; snap "before-$name"; cleanup_actors
-  local T0=$SECONDS
+  local T0=$SECONDS; rm -f "$RUN_DIR/$name.stopped"
   ( while true; do snap "during-$name" >> "$RUN_DIR/$name-snaps.txt"; sleep 30; done ) & local SN=$!
   RULES="$RUN_DIR/$name-rules.txt"; : > "$RULES"; watch_rules "$n" "$name" & local WR=$!
   local pids=() i; for i in $(seq 1 "$shards"); do IMAGE=$image OUT="$RUN_DIR/$name-$i.tsv" STAGGER_S=$stagger timeout 3600 python3 -u "$LD/burn_driver.py" $((n / shards)) "$@" > "$LOG_DIR/$name-$i.log" 2>&1 & pids+=($!); done
@@ -120,7 +120,7 @@ run_gym() { local name=$1 cfg=$2 n=$3 think=$4 box=${5:-0} rc
   nohup python "$REPO/scripts/replay_policy.py" --rollouts responses_api_agents/mini_swe_agent_2/data/example_rollouts.jsonl --port 9797 --think-mean-s "$think" --seed 1 > "$LOG_DIR/replay-$name.log" 2>&1 < /dev/null & sleep 4
   curl -sf localhost:9797/healthz >/dev/null || { ev "replay policy failed to start for $name"; return 1; }
   ev "start $name (run_arm $cfg n=$n think=$think box=$box)"; snap "before-$name"; cleanup_actors
-  local T0=$SECONDS
+  local T0=$SECONDS; rm -f "$RUN_DIR/$name.stopped"
   ( while true; do snap "during-$name" >> "$RUN_DIR/$name-snaps.txt"; sleep 30; done ) & local SN=$!
   RULES="$RUN_DIR/$name-rules.txt"; : > "$RULES"; watch_rules "$n" "$name" & local WR=$!
   export GYM_DIR RUN_DIR LOG_DIR ATESPACE INPUT="$ROW" EXTRA_CONFIGS="$RUN_DIR/image-rewrites.yaml,$AGENT_CFG" REPLAY_URL=http://127.0.0.1:9797
