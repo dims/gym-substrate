@@ -6,14 +6,15 @@
 # and the provider configs for this cluster.
 #   hack/gym-checkout.sh
 # Environment: WORK, GYM_DIR (default WORK/gym), GYM_REF (default upstream/main), GYM_BRANCHES
-# (dims/Nemo-Gym branches merged on top; default: the four open pull requests),
+# (dims/Nemo-Gym branches merged on top; default none: the four pull requests the provider needed
+# are on Gym main),
 # GYM_SUBSTRATE_SOURCE (a directory or a git URL for the plugin; default this repository's main),
 # REPLAY_URL (default http://127.0.0.1:9797, written to env.yaml).
 set -uo pipefail
 # shellcheck source=hack/_lib.sh
 . "$(dirname "$0")/_lib.sh"
 GYM_DIR="${GYM_DIR:-$WORK/gym}"; GYM_REF="${GYM_REF:-upstream/main}"
-GYM_BRANCHES="${GYM_BRANCHES:-config-atomic-write abort-dead-sandbox litellm-replay-fields plugin-server-deps}"
+GYM_BRANCHES="${GYM_BRANCHES:-}"
 GYM_SUBSTRATE_SOURCE="${GYM_SUBSTRATE_SOURCE:-git+https://github.com/dims/gym-substrate}"
 REPLAY_URL="${REPLAY_URL:-http://127.0.0.1:9797}"
 NODE_IP=$(node_ip); [ -n "$NODE_IP" ] || fail NODE_IP "no $RUN_DIR/node-ip; run hack/kind-up.sh first"
