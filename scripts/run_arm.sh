@@ -13,7 +13,8 @@
 # REPLAY_URL (default http://127.0.0.1:9797), EXTRA_CONFIGS (comma-separated
 # config paths appended to the servers' config, such as an image-rewrites
 # file), ATESPACE (default nemo-gym), SERVER_WAIT_S (default 600: the first start builds
-# the agent server's venv).
+# the agent server's venv). `gym env start` is tried twice: a component that dies at startup
+# leaves the others waiting for it.
 set -uo pipefail
 NAME="$1"; CFG="$2"; N="$3"
 GYM_DIR="${GYM_DIR:-$PWD}"; RUN_DIR="${RUN_DIR:-$HOME/gym-run}"; LOG_DIR="${LOG_DIR:-$HOME/logs}"
@@ -46,12 +47,22 @@ done
 [ "$busy" -eq 0 ] || { echo "earlier Gym servers still hold their ports after 30 s: $(for p in $PORTS; do ss -ltnH "sport = :$p" 2>/dev/null | grep -q . && printf '%s ' "$p"; done)"; exit 1; }
 sleep 2
 SERVER_LOG="$LOG_DIR/gym-env-$NAME.log"
-: > "$SERVER_LOG"; ln -sf "$SERVER_LOG" "$LOG_DIR/gym-env.log"
 CONFIGS="$AGENT_CFG,$CFG,$MODEL_CFG${EXTRA_CONFIGS:+,$EXTRA_CONFIGS}"
-nohup gym env start "+config_paths=[$CONFIGS]" > "$SERVER_LOG" 2>&1 < /dev/null &
+# Ready once the four servers have bound their ports (the "startup complete" line comes before
+# the bind). A server that ends early ("finished unexpectedly") or a dead gym process restarts
+# the lot once.
 n=0
-for _ in $(seq 1 $(( ${SERVER_WAIT_S:-600} / 5 ))); do
-  sleep 5; n=$(grep -c "startup complete" "$SERVER_LOG"); [ "$n" -ge 4 ] && break
+for attempt in 1 2; do
+  : > "$SERVER_LOG"; ln -sf "$SERVER_LOG" "$LOG_DIR/gym-env.log"
+  nohup gym env start "+config_paths=[$CONFIGS]" > "$SERVER_LOG" 2>&1 < /dev/null &
+  GYM_PID=$!
+  for _ in $(seq 1 $(( ${SERVER_WAIT_S:-600} / 5 ))); do
+    sleep 5; n=$(grep -c "Uvicorn running on" "$SERVER_LOG"); [ "$n" -ge 4 ] && break
+    if grep -q "finished unexpectedly" "$SERVER_LOG" || ! kill -0 "$GYM_PID" 2>/dev/null; then break; fi
+  done
+  [ "$n" -ge 4 ] && break
+  echo "attempt $attempt: $n of 4 servers bound; $(grep -c 'finished unexpectedly' "$SERVER_LOG") finished unexpectedly, gym pid alive: $(kill -0 "$GYM_PID" 2>/dev/null && echo yes || echo no)"
+  pkill -f "[g]ym env start" 2>/dev/null; ray stop --force >/dev/null 2>&1; sleep 5
 done
 [ "$n" -ge 4 ] || { echo "servers failed to start within ${SERVER_WAIT_S:-600}s; see $SERVER_LOG"; exit 1; }
 
