@@ -124,6 +124,8 @@ _FAILED_CREATE_CLEANUP_RETRY_S = 15.0
 _FAILED_CREATE_CLEANUP_BUDGET_S = 900.0
 # How long a park may stay mid-transition before the provider stops waiting.
 _PARK_SETTLE_BUDGET_S = 30.0
+# How many grpc_timeout_s a delete that outran its deadline may take to finish.
+_DELETE_SETTLE_FACTOR = 5
 
 _STATUS_MAP = {
     ateapi_pb2.ActorState.ACTOR_STATE_RUNNING: SandboxStatus.RUNNING,
@@ -1262,8 +1264,10 @@ class SubstrateProvider:
                 await self._wait_until_gone(actor)
 
     async def _wait_until_gone(self, actor: _SubstrateActor) -> None:
+        # A fresh pool's first mass delete kept a tenth of 1536 actors DELETING
+        # for over four minutes; they all went within the arm.
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._connection.grpc_timeout_s
+        deadline = loop.time() + _DELETE_SETTLE_FACTOR * self._connection.grpc_timeout_s
         while True:
             try:
                 reply = await self._control("GetActor", ateapi_pb2.GetActorRequest(actor=actor.object_ref))
@@ -1274,7 +1278,7 @@ class SubstrateProvider:
             if loop.time() >= deadline:
                 raise RuntimeError(
                     f"actor {actor.name!r} is still {ateapi_pb2.ActorState.Name(reply.status.state)} "
-                    f"{self._connection.grpc_timeout_s:g}s after its delete outran the deadline"
+                    f"{_DELETE_SETTLE_FACTOR * self._connection.grpc_timeout_s:g}s after its delete outran the deadline"
                 )
             await asyncio.sleep(2.0)
 
