@@ -76,3 +76,17 @@ def test_cli_prints_a_table(capsys) -> None:
     assert _summarize().main([str(FIXTURE), "--label", "box", "--no-header"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert len(out) == 2 and out[0].startswith("| box | s2-16-never |")
+
+
+def test_error_kind_names_the_cause() -> None:
+    summarize = _summarize()
+    cases = {
+        "router returned 503: actor x unavailable: no worker has room for the actor": "parked out",
+        "sandbox exec failed (timeout), sandbox is running: no output": "exec timeout",
+        "deleting actor failed: Deadline Exceeded": "exec timeout",
+        "AssignWorker prerequisite not met (got: ACTOR_STATE_CRASHED, want ACTOR_STATE_SUSPENDED)": "crashed",
+        "router returned 503: upstream connect error or disconnect/reset before headers. reset reason: connection termination": "upstream reset",
+        "PodCertificateRequest ate-system/x was not issued within 120s": "certificate",
+        "something else": "other",
+    }
+    assert {text: summarize.error_kind(text) for text in cases} == cases

@@ -15,6 +15,7 @@ Standard library only.
 """
 
 import argparse
+import json
 import re
 import statistics
 import sys
@@ -45,7 +46,43 @@ COLUMNS = [
     "crashes",
     "host mem peak",
     "restarts",
+    "error kinds",
 ]
+# The cause of an errored rollout or failed step, from the text the provider or Gym left.
+ERROR_KINDS = [
+    ("parked out", re.compile(r"no worker has room|router at capacity|gave up")),
+    ("exec timeout", re.compile(r"timeout|Deadline Exceeded", re.I)),
+    ("crashed", re.compile(r"CRASHED")),
+    ("upstream reset", re.compile(r"upstream connect error|reset reason")),
+    ("certificate", re.compile(r"PodCertificateRequest")),
+    ("lot full", re.compile(r"LOT_FULL|lot is full", re.I)),
+]
+
+
+def error_kind(text: str) -> str:
+    for name, pattern in ERROR_KINDS:
+        if pattern.search(text):
+            return name
+    return "other"
+
+
+def error_kinds(d: Path, arm: str) -> str:
+    """Counts per kind over the arm's errored rollouts (<arm>.jsonl) and failed steps (the STEP-FAILED rows)."""
+    counts: dict[str, int] = {}
+    if (f := find(d, f"{arm}.jsonl")) is not None:
+        for line in f.read_text(errors="replace").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            text = str((row.get("metadata") or {}).get("error") or row.get("failure_reason") or "")
+            if text:
+                kind = error_kind(text)
+                counts[kind] = counts.get(kind, 0) + 1
+    for c in read_rows(d, arm):
+        if c[1] == "STEP-FAILED" and len(c) > 5:
+            kind = error_kind(c[5])
+            counts[kind] = counts.get(kind, 0) + 1
+    return ", ".join(f"{k} {n}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
 def stamp(s: str) -> datetime:
@@ -180,6 +217,7 @@ def burn_row(arm: str, ev: dict, rows: list[list[str]], d: Path, samples) -> lis
         str(crashes),
         host_peak(samples, start, end),
         restarts(snaps),
+        error_kinds(d, arm),
     ]
 
 
@@ -210,6 +248,7 @@ def gym_row(arm: str, ev: dict, d: Path, samples) -> list[str]:
         str(crashes),
         host_peak(samples, start, end),
         restarts(snaps),
+        error_kinds(d, arm),
     ]
 
 
