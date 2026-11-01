@@ -919,6 +919,31 @@ async def test_exec_warns_when_it_gives_up_after_capacity_retries(
     assert execs == _capacity_retries(warnings[0]) + 1 >= 2
 
 
+async def test_create_probes_again_after_an_upstream_reset() -> None:
+    recorder = _Recorder()
+    provider = _make_provider(recorder)
+    probes = 0
+
+    def router(request: httpx.Request) -> httpx.Response:
+        nonlocal probes
+        if request.url.path != "/readyz":
+            return httpx.Response(204)
+        probes += 1
+        if probes == 1:
+            return httpx.Response(
+                503,
+                text="upstream connect error or disconnect/reset before headers. reset reason: connection termination",
+            )
+        return httpx.Response(200)
+
+    provider._http = substrate_provider.SubstrateProvider._http.__get__(provider)
+    provider._http_client = httpx.AsyncClient(transport=httpx.MockTransport(router), base_url="http://router")
+
+    await provider.create(SandboxSpec(image=IMAGE))
+
+    assert probes == 2 and "DeleteActor" not in recorder.rpcs()
+
+
 async def test_create_fails_at_once_when_the_actor_crashed() -> None:
     # The router's 503 names a reason that will not clear; the create must not wait out its budget.
     recorder = _Recorder(probe_status=503, probe_body="actor swebench/gym-x unavailable: actor state is CRASHED")

@@ -106,6 +106,8 @@ _TRANSIENT_MARKERS = (
     "please retry",
     "another operation is in progress",
 )
+# Envoy's text when the connection to the actor dropped before any response header.
+_UPSTREAM_RESET = "upstream connect error or disconnect/reset before headers"
 _TRANSITION_RETRY_DELAY_S = 1.0
 _TRANSIENT_RETRY_BUDGET_S = 60.0
 
@@ -894,9 +896,11 @@ class SubstrateProvider:
                     last_detail = f"status={response.status_code}, body={response.text.strip()!r}"
                     kind = _classify_unavailable(response)
                     queued = kind == "capacity"
-                    if response.status_code == 503 and kind is None:
+                    if response.status_code == 503 and kind is None and _UPSTREAM_RESET not in response.text:
                         # The router names a reason that will not clear: the actor crashed at
                         # its first resume, or is gone. Waiting out the budget helps nobody.
+                        # Envoy's own upstream reset is the exception: the connection to the
+                        # actor dropped before any header, and the next probe gets a new one.
                         raise SubstrateCreateVerificationError(
                             f"actor {handle.sandbox_id!r} cannot become ready: {last_detail}"
                         )
