@@ -5,7 +5,7 @@
 # The saturation ladder: one mode per invocation, so a stop rule never skips the next stage.
 #   scripts/ladder/ladder.sh MODE
 # N scales with SLOTS, the one-core slots of the gym pools (ACTIVE gym workers x POOL_CPU);
-# arm names carry N. Modes:
+# arm names carry N. A pinned SLOTS scales N only; scripts/ladder/set-slots.sh changes the capacity. Modes:
 #   s2a      Gym N never, then N pause (think 2 s)      s2never, s2pause: one of the two
 #   s1b4x    burn-xs 4 x N running: the restore wave under full load
 #   light    burn-xxs 8 x N resident, desynchronized: 3 creates per second, no barrier, 40 x 3 s / 30 s
