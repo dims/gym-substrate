@@ -34,7 +34,7 @@ def test_one_row_per_arm_in_start_order() -> None:
     rows = _summarize().summarize(FIXTURE)
     assert [r[0] for r in rows] == ["s2-16-never", "s1b-64-never"]
     # Gym arm: the runner's wall and per-task latencies; the host sampler started later, so no peak.
-    assert rows[0] == ["s2-16-never", "16 rollouts", "PASS", "78 s", "", "1.1 min", "1.2 min", "0", "0", "", ""]
+    assert rows[0] == ["s2-16-never", "16 rollouts", "PASS", "78 s", "", "1.1 min", "1.2 min", "0", "0", "", "", ""]
     # Burn arm: 2 shards x 2 sandboxes x 15 steps; first step = median exec0 of the four sandboxes.
     assert rows[1] == [
         "s1b-64-never",
@@ -48,6 +48,7 @@ def test_one_row_per_arm_in_start_order() -> None:
         "0",
         "53 G",
         "0",
+        "",
     ]
 
 

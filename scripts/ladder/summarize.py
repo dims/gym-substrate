@@ -51,17 +51,19 @@ COLUMNS = [
 # The cause of an errored rollout or failed step, from the text the provider or Gym left.
 ERROR_KINDS = [
     ("parked out", re.compile(r"no worker has room|router at capacity|gave up")),
-    ("exec timeout", re.compile(r"timeout|Deadline Exceeded", re.I)),
-    ("crashed", re.compile(r"CRASHED")),
-    ("upstream reset", re.compile(r"upstream connect error|reset reason")),
     ("certificate", re.compile(r"PodCertificateRequest")),
+    ("upstream reset", re.compile(r"upstream connect error|reset reason")),
+    ("crashed", re.compile(r"CRASHED")),
     ("lot full", re.compile(r"LOT_FULL|lot is full", re.I)),
+    ("exec timeout", re.compile(r"\btimeout\b|timed out|Deadline Exceeded", re.I)),
 ]
 
 
 def error_kind(text: str) -> str:
+    """The cause named by the last line of the text (a traceback ends with the exception)."""
+    last = text.strip().splitlines()[-1] if text.strip() else ""
     for name, pattern in ERROR_KINDS:
-        if pattern.search(text):
+        if pattern.search(last):
             return name
     return "other"
 
