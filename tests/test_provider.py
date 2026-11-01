@@ -995,6 +995,59 @@ class _FakeK8s:
         return self._api
 
 
+def test_router_credentials_are_shared_through_a_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    monkeypatch.setenv("ROUTER_CERT_DIR", str(tmp_path))
+    mints = 0
+
+    def fake_request(k8s_client, namespace, service_account):
+        nonlocal mints
+        mints += 1
+        key = ec.generate_private_key(ec.SECP256R1())
+        now = datetime.datetime.now(datetime.timezone.utc)
+        name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "t")])
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(1)
+            .not_valid_before(now - datetime.timedelta(hours=(mints - 1) * 20))  # the second one is past half life
+            .not_valid_after(now + datetime.timedelta(hours=24 - (mints - 1) * 20))
+            .sign(key, hashes.SHA256())
+        )
+        key_pem = key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+        return key_pem, cert.public_bytes(serialization.Encoding.PEM)
+
+    monkeypatch.setattr(substrate_provider, "_request_router_certificate", fake_request)
+    provider = substrate_provider.SubstrateProvider(connection={"atespace": "a", "template_namespace": "a"})
+    provider._kube_client = lambda: None  # type: ignore[method-assign]
+
+    path = provider._router_credentials()
+    assert mints == 1 and path.read_bytes().startswith(b"-----BEGIN PRIVATE KEY-----")
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    # a second provider (another process in practice) reuses the file
+    assert (
+        substrate_provider.SubstrateProvider(
+            connection={"atespace": "a", "template_namespace": "a"}
+        )._router_credentials()
+        == path
+    )
+    assert mints == 1
+    # a stale file is minted again
+    path.write_bytes(fake_request(None, "ns", "sa")[0] + b"")
+    assert not substrate_provider._cert_pem_usable(path.read_bytes())
+    provider._router_credentials()
+    assert mints == 3
+
+
 @pytest.mark.parametrize("outcome", ["Issued", "Denied"])
 def test_router_certificate_comes_from_a_podcertificaterequest(outcome: str) -> None:
     import base64

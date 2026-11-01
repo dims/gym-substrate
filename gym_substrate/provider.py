@@ -9,12 +9,12 @@ import asyncio
 import base64
 import contextlib
 import copy
+import fcntl
 import hashlib
 import logging
 import os
 import random
 import ssl
-import tempfile
 import threading
 import time
 import uuid
@@ -43,14 +43,34 @@ _TOKEN_TTL_S = 3600
 
 # The ingress router takes mTLS only. Its client certificate comes from the
 # podidentity signer through a PodCertificateRequest, as kubectl-ate's does, and
-# the signer caps it at 24 h. Gym makes one provider per sandbox, so the
-# certificate is shared by every provider in the process and requested again
-# once half its life has passed.
+# the signer caps it at 24 h. Gym runs each rollout in its own Ray worker
+# process, so the certificate is kept in a file (ROUTER_CERT_DIR, default
+# ~/.cache/gym-substrate, mode 0600) that every process on the host shares
+# under a lock, and requested again once half its life has passed; 768
+# processes minting at once left the signer over 120 s behind.
 _PODIDENTITY_SIGNER = "podidentity.podcert.ate.dev/identity"
 _ROUTER_CERT_LIFETIME_S = 24 * 3600
 _ROUTER_CERT_ISSUE_TIMEOUT_S = 120.0
 _router_certs: dict[tuple[str, str], tuple[bytes, bytes, float]] = {}
 _router_certs_lock = threading.Lock()
+
+
+def _router_cert_dir() -> Path:
+    return Path(os.environ.get("ROUTER_CERT_DIR") or os.path.join(os.path.expanduser("~"), ".cache", "gym-substrate"))
+
+
+def _cert_pem_usable(pem: bytes) -> bool:
+    """True while the leaf in pem has more than half of its lifetime left."""
+    from cryptography import x509
+
+    try:
+        key_end = pem.index(b"-----END PRIVATE KEY-----") + len(b"-----END PRIVATE KEY-----")
+        leaf = x509.load_pem_x509_certificate(pem[key_end:])
+    except (ValueError, IndexError):
+        return False
+    not_before, not_after = leaf.not_valid_before_utc.timestamp(), leaf.not_valid_after_utc.timestamp()
+    return time.time() < not_before + (not_after - not_before) / 2
+
 
 TARGET_ACTOR_HEADER = "ate-target-actor"
 
@@ -602,27 +622,33 @@ class SubstrateProvider:
     def _channel_credentials(self) -> grpc.ChannelCredentials:
         return grpc.ssl_channel_credentials(root_certificates=self._ca_bundle())
 
-    def _router_tls_context(self) -> ssl.SSLContext:
-        """mTLS to the router: the process's client certificate, the cluster CA, the router's name."""
+    def _router_credentials(self) -> Path:
+        """The host's shared client certificate file (key and chain PEM), minted when missing or past half life."""
         namespace = self._connection.service_account_namespace
         service_account = self._connection.ingress_service_account
-        with _router_certs_lock:
-            cached = _router_certs.get((namespace, service_account))
-            if cached is None or time.monotonic() >= cached[2]:
-                key_pem, chain_pem = _request_router_certificate(self._kube_client(), namespace, service_account)
-                cached = (key_pem, chain_pem, time.monotonic() + _ROUTER_CERT_LIFETIME_S / 2)
-                _router_certs[(namespace, service_account)] = cached
+        d = _router_cert_dir()
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = d / f"router-{namespace}-{service_account}.pem"
+        with _router_certs_lock, open(d / f".{path.name}.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                if not (path.is_file() and _cert_pem_usable(path.read_bytes())):
+                    key_pem, chain_pem = _request_router_certificate(self._kube_client(), namespace, service_account)
+                    tmp = d / f".{path.name}.{os.getpid()}"
+                    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+                        f.write(key_pem + chain_pem)
+                    os.replace(tmp, path)
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+        return path
+
+    def _router_tls_context(self) -> ssl.SSLContext:
+        """mTLS to the router: the host's client certificate, the cluster CA, the router's name."""
         context = _ServerNameContext(ssl.PROTOCOL_TLS_CLIENT)
         context.server_name = self._connection.router_server_name
         context.load_verify_locations(cadata=self._ca_bundle().decode())
         context.set_alpn_protocols(["http/1.1"])
-        # load_cert_chain reads files: the key is on disk for this call only, readable by this user.
-        with tempfile.TemporaryDirectory() as d:
-            cert_path, key_path = os.path.join(d, "tls.crt"), os.path.join(d, "tls.key")
-            with os.fdopen(os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
-                f.write(cached[0])
-            Path(cert_path).write_bytes(cached[1])
-            context.load_cert_chain(cert_path, key_path)
+        context.load_cert_chain(str(self._router_credentials()))
         return context
 
     async def _control(self, rpc: str, request: Any) -> Any:

@@ -27,8 +27,8 @@
 # Stop rules, checked every 15 s inside an arm and once after it: CRASHED actors above 1 % of N;
 # any ate-system restart; a node not Ready for over STOP_NOTREADY_S (60); host memory used above
 # STOP_MEM_USED_GIB (default 90 % of the total); free space under docker's data root below
-# STOP_DISK_FREE_GB (default 10 % of that filesystem). A breach ends the arm: its processes are
-# killed and the rule is logged.
+# STOP_DISK_FREE_GB (default 10 % of that filesystem); errored rollouts of a Gym arm above
+# STOP_ERRORED_PCT (5) of N. A breach ends the arm: its processes are killed and the rule is logged.
 # After each arm: the actor list, the api-server log and the previous log of every restarted gym
 # worker go to the ladder dir, and on the microvm class the restore phases of the arm.
 set -u
@@ -62,7 +62,7 @@ promdump() { [ -n "$PROM_URL" ] || return 0
   else rm -f "$OUT/prom-$1.json"; echo "prom dump $1: $PROM_URL did not answer"; fi; }
 RESTARTS0=$(restarts)
 STOP_MEM_USED_GIB="${STOP_MEM_USED_GIB:-$(( $(free -g | awk '/^Mem:/{print $2}') * 90 / 100 ))}"
-STOP_NOTREADY_S="${STOP_NOTREADY_S:-60}"
+STOP_NOTREADY_S="${STOP_NOTREADY_S:-60}"; STOP_ERRORED_PCT="${STOP_ERRORED_PCT:-5}"; ARM_JSONL=""
 DOCKER_ROOT=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
 STOP_DISK_FREE_GB="${STOP_DISK_FREE_GB:-$(( $(df -BG --output=size "$DOCKER_ROOT" 2>/dev/null | tail -1 | tr -dc 0-9) / 10 ))}"
 NOTREADY_SINCE=0; RULES=/dev/null
@@ -78,8 +78,12 @@ rule_breach() { local n=$1 crashed r m d nr now
   [ -n "$d" ] && [ "$d" -lt "$STOP_DISK_FREE_GB" ] && { echo "disk free ${d}G < ${STOP_DISK_FREE_GB}G under $DOCKER_ROOT"; return; }
   if [ -n "$nr" ]; then
     [ "$NOTREADY_SINCE" -eq 0 ] && NOTREADY_SINCE=$now
-    [ $((now - NOTREADY_SINCE)) -gt "$STOP_NOTREADY_S" ] && echo "nodes not Ready for over ${STOP_NOTREADY_S}s: ${nr% }"
-  else NOTREADY_SINCE=0; fi; return 0; }
+    [ $((now - NOTREADY_SINCE)) -gt "$STOP_NOTREADY_S" ] && { echo "nodes not Ready for over ${STOP_NOTREADY_S}s: ${nr% }"; return; }
+  else NOTREADY_SINCE=0; fi
+  if [ -n "$ARM_JSONL" ] && [ -s "$ARM_JSONL" ]; then
+    local errored; errored=$(python3 -c 'import json,sys; print(sum(1 for l in open(sys.argv[1]) if l.strip() and (json.loads(l).get("metadata") or {}).get("error")))' "$ARM_JSONL" 2>/dev/null || echo 0)
+    [ "$errored" -gt $((n * STOP_ERRORED_PCT / 100)) ] && echo "$errored errored rollouts (> $STOP_ERRORED_PCT % of $n)"
+  fi; return 0; }
 # watch_rules N NAME: every 15 s until killed; a breach ends the arm's processes and marks the arm.
 watch_rules() { local msg; while sleep 15; do msg=$(rule_breach "$1"); [ -n "$msg" ] || continue
   ev "STOP RULE: $msg"; touch "$RUN_DIR/$2.stopped"; pkill -f '[g]ym eval run|[b]urn_driver.py|[r]un_arm.sh' 2>/dev/null; return; done; }
@@ -126,11 +130,11 @@ run_gym() { local name cfg=$2 n=$3 think=$4 box=${5:-0} rc; name=$(unique_name "
   ev "start $name (run_arm $cfg n=$n think=$think box=$box)"; snap "before-$name"; cleanup_actors
   local T0=$SECONDS; rm -f "$RUN_DIR/$name.stopped"
   ( while true; do snap "during-$name" >> "$RUN_DIR/$name-snaps.txt"; sleep 30; done ) & local SN=$!
-  RULES="$RUN_DIR/$name-rules.txt"; : > "$RULES"; watch_rules "$n" "$name" & local WR=$!
+  RULES="$RUN_DIR/$name-rules.txt"; : > "$RULES"; ARM_JSONL="$RUN_DIR/$name.jsonl"; watch_rules "$n" "$name" & local WR=$!
   export GYM_DIR RUN_DIR LOG_DIR ATESPACE INPUT="$ROW" EXTRA_CONFIGS="$RUN_DIR/image-rewrites.yaml,$AGENT_CFG" REPLAY_URL=http://127.0.0.1:9797
   if [ "$box" -gt 0 ]; then timeout "$box" bash "$REPO/scripts/run_arm.sh" "$name" "$cfg" "$n" > "$LOG_DIR/$name.runner.log" 2>&1; rc=$?
   else bash "$REPO/scripts/run_arm.sh" "$name" "$cfg" "$n" > "$LOG_DIR/$name.runner.log" 2>&1; rc=$?; fi
-  kill "$SN" "$WR" 2>/dev/null
+  kill "$SN" "$WR" 2>/dev/null; ARM_JSONL=""
   ev "end $name rc=$rc (124 = time box)"; grep -E "warmup|policy=|reward|Per-task|worker-seconds|eval_error|leaked" "$LOG_DIR/$name.runner.log" | cut -c1-220 | tee -a "$EV"; promdump "$name"; snap "after-$name" | tee -a "$EV"
   collect "$name" $((SECONDS - T0 + 30))
   stop_rule "$n" "$name"; local sr=$?; cleanup_actors; return $(( rc != 0 || sr != 0 )); }
