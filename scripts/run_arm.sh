@@ -62,7 +62,13 @@ for attempt in 1 2; do
   done
   [ "$n" -ge 4 ] && break
   echo "attempt $attempt: $n of 4 servers bound; $(grep -c 'finished unexpectedly' "$SERVER_LOG") finished unexpectedly, gym pid alive: $(kill -0 "$GYM_PID" 2>/dev/null && echo yes || echo no)"
-  pkill -f "[g]ym env start" 2>/dev/null; ray stop --force >/dev/null 2>&1; sleep 5
+  pkill -f "[g]ym env start" 2>/dev/null; ray stop --force >/dev/null 2>&1
+  # A server that died on "address already in use" names the port a stray process of the previous
+  # arm still holds; free it before the retry.
+  for p in $(grep -o "bind on address ('127.0.0.1', [0-9]*)" "$SERVER_LOG" | grep -o '[0-9]*)' | tr -d ')' | sort -u); do
+    echo "freeing port $p held by: $(fuser -n tcp "$p" 2>/dev/null | tr -s ' ')"; fuser -k -n tcp "$p" >/dev/null 2>&1
+  done
+  sleep 5
 done
 [ "$n" -ge 4 ] || { echo "servers failed to start within ${SERVER_WAIT_S:-600}s; see $SERVER_LOG"; exit 1; }
 
