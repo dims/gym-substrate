@@ -116,6 +116,8 @@ run_burn() { local name image=$2 shards=$3 stagger=$4 n=$5; name=$(unique_name "
   ( while true; do snap "during-$name" >> "$RUN_DIR/$name-snaps.txt"; sleep 30; done ) & local SN=$!
   RULES="$RUN_DIR/$name-rules.txt"; : > "$RULES"; watch_rules "$n" "$name" & local WR=$!
   local pids=() i; for i in $(seq 1 "$shards"); do IMAGE=$image OUT="$RUN_DIR/$name-$i.tsv" STAGGER_S=$stagger timeout 3600 python3 -u "$LD/burn_driver.py" $((n / shards)) "$@" > "$LOG_DIR/$name-$i.log" 2>&1 & pids+=($!); done
+  # One actor listing with the worker pods 90 s into the wave, so slow deletes and stalls can be attributed to workers.
+  ( sleep 90; kubectl ate get actors -a "$ATESPACE" > "$RUN_DIR/$name-actors-midwave.txt" 2>/dev/null ) &
   local rc=0 pid; for pid in "${pids[@]}"; do wait "$pid" || rc=1; done; kill "$SN" "$WR" 2>/dev/null
   ev "end $name rc=$rc"; for i in $(seq 1 "$shards"); do grep -E "RESULT|policy=" "$LOG_DIR/$name-$i.log" | tail -2 | cut -c1-240 | sed "s/^/shard $i: /" | tee -a "$EV"; done; promdump "$name"; snap "after-$name" | tee -a "$EV"
   collect "$name" $((SECONDS - T0 + 30))
@@ -159,6 +161,6 @@ case "$MODE" in
   soak)    for i in 1 2 3; do run_gym "soak-$STAMP-$i-$N1-pause" "$SAT" "$N1" 2 || bad "soak-$STAMP-$i-$N1-pause"; run_gym "soak-$STAMP-$i-$N1-never" "$NEVER" "$N1" 2 || bad "soak-$STAMP-$i-$N1-never"; done ;;
   *) echo "unknown mode $MODE"; exit 2 ;;
 esac
-cp "$RUN_DIR"/*.tsv "$RUN_DIR"/*-snaps.txt "$RUN_DIR"/host-samples.txt "$RUN_DIR"/*_aggregate_metrics.json "$RUN_DIR"/*-samples.txt "$RUN_DIR"/*-rules.txt "$OUT"/ 2>/dev/null
+cp "$RUN_DIR"/*.tsv "$RUN_DIR"/*-snaps.txt "$RUN_DIR"/host-samples.txt "$RUN_DIR"/host-samples-dstate.txt "$RUN_DIR"/*-actors-midwave.txt "$RUN_DIR"/*_aggregate_metrics.json "$RUN_DIR"/*-samples.txt "$RUN_DIR"/*-rules.txt "$OUT"/ 2>/dev/null
 ev "done ($MODE); outputs in $OUT; failed=$FAILED"
 exit $FAILED

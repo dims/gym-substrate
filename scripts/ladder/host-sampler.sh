@@ -5,7 +5,9 @@
 # host-sampler.sh [OUT] [INTERVAL_S]
 # One line per sample: UTC time, CPU busy percent (/proc/stat), memory used (free -g),
 # root NVMe write MB/s (/proc/diskstats), load; every 30 s also docker stats of the
-# kind node containers (name=cpu%,mem). Stop with kill; the file is append-only.
+# kind node containers (name=cpu%,mem). Each sample also writes the D-state processes by wait
+# channel to <OUT minus .txt>-dstate.txt, to name the kernel wait behind a stall. Stop with kill;
+# the files are append-only.
 set -u
 OUT=${1:-${RUN_DIR:-$HOME/gym-substrate-run/run}/host-samples.txt}; IV=${2:-5}
 mkdir -p "$(dirname "$OUT")"
@@ -24,4 +26,6 @@ while sleep "$IV"; do
   line="$(date -u +%FT%TZ) busy=${busy}% mem_used=$(free -g | awk '/^Mem:/{print $3}')G disk_w=${mbs}MB/s load=$(cut -d' ' -f1-3 /proc/loadavg | tr ' ' ,)"
   n=$((n+1)); [ $(( (n*IV) % 30 )) -eq 0 ] && line="$line nodes: $(nodes)"
   echo "$line" >> "$OUT"; T0=$T1; I0=$I1; W0=$W1
+  ds=$(ps -eo stat,wchan:40,comm --no-headers 2>/dev/null | awk '$1 ~ /^D/ {print $2"/"$3}' | sort | uniq -c | sort -rn)
+  echo "$(date -u +%FT%TZ) D=$(echo "$ds" | awk '{s+=$1} END{print s+0}') $(echo "$ds" | head -8 | awk '{printf "%s:%s ", $1, $2}')" >> "${OUT%.txt}-dstate.txt"
 done
