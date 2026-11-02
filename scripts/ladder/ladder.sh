@@ -98,7 +98,8 @@ collect() { local p
   [ "$RUNTIME" = microvm ] && bash "$LD/restore-phases.sh" "$2" "$OUT/$1-restore-phases.jsonl" | tee -a "$EV"; return 0; }
 # At an arm boundary nothing else runs in the atespace, so the whole atespace is the arm's leftovers.
 cleanup_actors() { python3 "$REPO/scripts/delete_actors.py" "$ATESPACE" --all 2>&1 | tail -1 | sed 's/^/cleanup: /'
-  local i left=1; for i in $(seq 1 36); do left=$(actors_left); [ "$left" -eq 0 ] && break; sleep 5; done
+  # Up to 10 min for the last actors to go: a stopped arm left 721 after a fixed 180 s wait (run 4 friction 32).
+  local i left=1; for i in $(seq 1 120); do left=$(actors_left); [ "$left" -eq 0 ] && break; sleep 5; done
   echo "cleanup: $left actors left after $((i * 5)) s" | tee -a "$EV"; }
 pgrep -f "ladder/host-sampler.sh" >/dev/null || { setsid nohup bash "$LD/host-sampler.sh" "$RUN_DIR/host-samples.txt" 5 > "$LOG_DIR/host-sampler.log" 2>&1 < /dev/null & }
 ev "start $MODE; slots $SLOTS; api $ATEAPI_ADDR; restarts baseline $RESTARTS0"
